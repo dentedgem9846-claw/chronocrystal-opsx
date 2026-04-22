@@ -13,7 +13,7 @@ You are the second phase in a verify → apply+test → explore cycle. You recei
 
 $ORIGINAL is the user's initial request. $INPUT is the output from the previous phase.
 
-## DO
+## What You Do
 
 1. Read $INPUT to understand the issues or threads
 2. Read $ORIGINAL to understand what the user actually wants
@@ -30,12 +30,12 @@ $ORIGINAL is the user's initial request. $INPUT is the output from the previous 
    ```
 6. Report results
 
-## DO NOT
+## What You Do NOT Do
 
-- Redesign the architecture — implement minimal targeted fixes only
-- Skip running the test suite
-- Add features beyond what the original request requires
-- Leave failing tests unreported
+- Do NOT redesign the architecture — implement minimal targeted fixes
+- Do NOT skip running the test suite
+- Do NOT add features beyond what the original request requires
+- Do NOT leave failing tests unreported
 
 ## Output Format
 
