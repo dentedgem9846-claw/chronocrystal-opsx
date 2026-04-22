@@ -1,13 +1,13 @@
 ---
 name: subagent-verify-applytest-explore
-description: "Subagent cycle: verify (GLM), apply+test (Kimi implements), explore (Gemma diagnoses — no edits). Loops until verify passes clean. Git commit at every handoff."
+description: "Subagent cycle: verify (GLM), triage (Kimi classifies), apply+test (Kimi fixes), explore (Gemma diagnoses — no edits). Loops until verify passes clean. Git commit at every handoff."
 license: MIT
 metadata:
   author: chronocrystal
-  version: "2.0"
+  version: "3.0"
 ---
 
-Three-phase subagent cycle. Loops until VERIFY passes clean. Explore only diagnoses — Kimi implements. Each phase runs as a `pi` subprocess in tmux. Handoff is text piping — no JSON files.
+Four-phase subagent cycle. Verify audits, triage classifies, apply+test fixes code, explore diagnoses failures. Loops until verify passes clean. Each phase runs as a `pi` subprocess in tmux. Handoff is text piping.
 
 ```
                     ┌──────────────────────────────────┐
@@ -18,6 +18,12 @@ Three-phase subagent cycle. Loops until VERIFY passes clean. Explore only diagno
        │      │  GLM 5.1 │         │
        │      └──────────┘         │ HAS_ISSUES
        │                           ▼
+       │                    ┌──────────┐
+       │                    │  TRIAGE   │──── DOCS_ONLY / CLEAN ────▶ COMPLETE
+       │                    │  Kimi    │         │
+       │                    └──────────┘         │ HAS_CODE_FIXES
+       │                                         │
+       │                                         ▼
        │                  ┌──────────────┐
        │                  │ APPLY & TEST  │◄──────────┐
        │                  │  Kimi k2.6    │             │
@@ -38,89 +44,53 @@ Three-phase subagent cycle. Loops until VERIFY passes clean. Explore only diagno
        └── loop until verify passes clean (max 3 iterations)
 ```
 
+Triage classifies every verify issue into three buckets:
+- **CODE FIX** → Kimi (apply+test) fixes it
+- **DOCUMENTATION** → Triage fixes docs itself (no code changes)
+- **SCOPE INCREASE** → Filed in `issues.md` for future changes (not this cycle)
+
 ## Agent Definitions
 
 | Phase | Agent File | Model | Tools | Skills |
 |-------|-----------|-------|-------|--------|
 | Verify | `.pi/agents/verify-glm.md` | glm-5.1:cloud | read,grep,find,ls,bash | openspec-verify-change, kawa-check |
+| Triage | `.pi/agents/triage-kimi.md` | kimi-k2.6:cloud | read,write,edit,bash,grep,find,ls | openspec-verify-change |
 | Apply & Test | `.pi/agents/applytest-kimi.md` | kimi-k2.6:cloud | read,write,edit,bash,grep,find,ls | openspec-apply-change, kawa-check, kawa-clean |
 | Explore | `.pi/agents/explore-gemma.md` | gemma4:31b-cloud | read,grep,find,ls | openspec-explore |
 
-Team: `verify-applytest-explore` in `.pi/agents/teams.yaml`
+Team: `verify-triage-applytest-explore` in `.pi/agents/teams.yaml`
 
 ## Handoff: Text Piping
 
-Each agent receives two things:
+Each agent receives:
 - **$INPUT** — the text output from the previous phase
 - **$ORIGINAL** — the user's initial request, carried unchanged through all phases
 
-Each agent also receives its **skills** from the agent frontmatter — the cycle script extracts the `skills:` list and passes `--skill` flags to `pi`. The skills are the primary workflow knowledge:
-- **Verify**: `openspec-verify-change` guides systematic completeness/correctness/coherence checks; `kawa-check` runs types, lint, and build
-- **Apply & Test**: `openspec-apply-change` provides change context (specs, tasks, design); `kawa-check` for build/lint; `kawa-clean` for stuck processes
-- **Explore**: `openspec-explore` orients diagnosis around the change's actual requirements
+Each agent also receives its **skills** from the agent frontmatter — the cycle script extracts the `skills:` list and passes `--skill` flags to `pi`. The skills are the primary workflow knowledge.
 
-No JSON files. No structured handoff. Just text in, text out.
+Transition signals are parsed from each agent's output:
+- Verify: `ASSESSMENT: CLEAN` or `ASSESSMENT: HAS_ISSUES`
+- Triage: `ASSESSMENT: HAS_CODE_FIXES`, `ASSESSMENT: DOCS_ONLY`, or `ASSESSMENT: CLEAN`
+- Apply & Test: `ASSESSMENT: ALL_PASSED` or `ASSESSMENT: HAS_FAILURES`
+- Explore: `NEXT: applytest`
 
-Transition signals are parsed from the last line of each agent's output:
-- Verify ends with `ASSESSMENT: CLEAN` or `ASSESSMENT: HAS_ISSUES`
-- Apply & Test ends with `ASSESSMENT: ALL_PASSED` or `ASSESSMENT: HAS_FAILURES`
-- Explore ends with `NEXT: applytest`
+## Triage: The Classification Layer
+
+Triage reads verify's output and the change's artifacts (proposal, specs, tasks, design) to decide:
+
+| Bucket | What | Who handles |
+|--------|------|-------------|
+| CODE FIX | Bug, missing test for spec'd behavior, code doesn't match spec | Kimi (apply+test) |
+| DOCUMENTATION | Task numbering gaps, outdated design.md, missing docs | Triage itself |
+| SCOPE INCREASE | New feature, architectural change, "would be nice" ideas | Written to `issues.md` |
+
+**Test for scope**: "Would the original proposer say 'I didn't ask for that'?" If yes → scope increase.
+
+Scope increases go to `openspec/changes/<name>/issues.md` — a lightweight backlog the user can review and promote to full change requests later.
 
 ## Kawa Core Model
 
 `gemma4:31b-cloud` — in `flux/kawa/.pi/settings.json`. Constant. Never switched.
-
-## Phase 1: VERIFY
-
-**Agent**: `verify-glm` | **Model**: `glm-5.1:cloud` | **Tools**: read,grep,find,ls,bash | **Skills**: openspec-verify-change, kawa-check
-
-```bash
-pi --model glm-5.1:cloud --no-tools --tools read,grep,find,ls,bash \
-  --no-extensions --no-session \
-  --skill /path/to/.pi/skills/openspec-verify-change \
-  --skill /path/to/.pi/skills/kawa-check \
-  --append-system-prompt "$(cat .pi/agents/verify-glm.md)" \
-  -p "Verify the change '$CHANGE_NAME' using openspec-verify-change. Run kawa-check." \
-  --mode text
-```
-
-Output ends with `ASSESSMENT: CLEAN` → **git commit, cycle done**.
-Output ends with `ASSESSMENT: HAS_ISSUES` → **git commit, pipe output to apply+test**.
-
-## Phase 2: APPLY & TEST
-
-**Agent**: `applytest-kimi` | **Model**: `kimi-k2.6:cloud` | **Tools**: read,write,edit,bash,grep,find,ls | **Skills**: openspec-apply-change, kawa-check, kawa-clean
-
-```bash
-pi --model kimi-k2.6:cloud --no-tools --tools read,write,edit,bash,grep,find,ls \
-  --no-extensions --no-session \
-  --skill /path/to/.pi/skills/openspec-apply-change \
-  --skill /path/to/.pi/skills/kawa-check \
-  --skill /path/to/.pi/skills/kawa-clean \
-  --append-system-prompt "$(cat .pi/agents/applytest-kimi.md)" \
-  -p "Fix these issues and run tests. Use openspec-apply-change for context. ORIGINAL: $ORIGINAL PREVIOUS: $INPUT" \
-  --mode text
-```
-
-Output ends with `ASSESSMENT: ALL_PASSED` → **git commit, pipe output to verify**.
-Output ends with `ASSESSMENT: HAS_FAILURES` → **git commit, pipe output to explore**.
-
-## Phase 3: EXPLORE
-
-**Agent**: `explore-gemma` | **Model**: `gemma4:31b-cloud` | **Tools**: read,grep,find,ls | **Skills**: openspec-explore
-
-**This phase does NOT modify files.** It reads code and produces THREADs for Kimi.
-
-```bash
-pi --model gemma4:31b-cloud --no-tools --tools read,grep,find,ls \
-  --no-extensions --no-session \
-  --skill /path/to/.pi/skills/openspec-explore \
-  --append-system-prompt "$(cat .pi/agents/explore-gemma.md)" \
-  -p "Diagnose failures. Use openspec-explore for change context. ORIGINAL: $ORIGINAL PREVIOUS: $INPUT" \
-  --mode text
-```
-
-Output ends with `NEXT: applytest` → **git commit, pipe threads to apply+test**.
 
 ## Git Commits at Every Handoff
 
@@ -130,26 +100,15 @@ Every phase **must** git commit before handing off. This creates a traceable his
 git add -A && git commit -m "opsx: <phase> <iteration> for <change-name>"
 ```
 
-Example git log:
-```
-opsx: verify 1 for create-testing-session-with-boxlite
-opsx: applytest 1 for create-testing-session-with-boxlite
-opsx: explore 1 for create-testing-session-with-boxlite
-opsx: applytest 2 for create-testing-session-with-boxlite
-opsx: verify 2 for create-testing-session-with-boxlite
-```
-
 ## Guardrails
 
-- **Max 3 full iterations** (verify → apply+test → explore = 1 iteration)
-- **Anti-looping**: If verify and apply+test alternate more than 3 times, force human intervention
+- **Max 3 full iterations** (verify → triage → apply+test → explore = 1 iteration)
+- **Anti-looping**: If verify and applytest alternate more than 3 times, force human intervention
 - **Tool enforcement**: Explore agent has no `write` or `edit` tools
 - **$ORIGINAL** carried through all phases to prevent context drift
 - **Git commit at every handoff** — no exceptions
 
 ## Orchestration via Tmux
-
-Each phase runs as a `pi` subprocess in tmux for real-time monitoring.
 
 ```
 ┌─────────────────────────────────────────────────────┐
@@ -157,26 +116,12 @@ Each phase runs as a `pi` subprocess in tmux for real-time monitoring.
 │                                                       │
 │  ┌────────────────┐  ┌────────────────────────────┐  │
 │  │  orchestrator   │  │  active phase (pi subprocess) │  │
-│  │  (left pane)    │  │  verify-glm / applytest-kimi │  │
-│  │                 │  │  explore-gemma                │  │
+│  │  (left pane)    │  │  verify / triage / applytest  │  │
+│  │                 │  │  explore                      │  │
 │  └────────────────┘  └────────────────────────────┘  │
 └─────────────────────────────────────────────────────┘
 ```
 
-- **Pane 0 (left)**: Orchestrator
-- **Pane 1 (right)**: Active `pi --agent <name> --no-session` subprocess
+## Cycle Definition
 
-```bash
-# Create session
-tmux new-session -d -s opsx-<change-name> -c /home/exedev/chronocrystal
-
-# Run phase in pane 1
-tmux send-keys -t opsx-<name>:0.1 "..." Enter
-
-# Attach to watch
-tmux attach -t opsx-<change-name>
-```
-
-## Cycle definition
-
-Declarative state machine in `openspec/.cycle/chain.yaml` — states, transitions, models, tools, and guardrails.
+Declarative state machine in `openspec/.cycle/chain.yaml`.

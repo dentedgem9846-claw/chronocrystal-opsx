@@ -1,8 +1,9 @@
-name: verify-applytest-explore
-description: "Verify (GLM audits specs), apply+test (Kimi fixes and runs e2e), explore (Gemma diagnoses failures — no code edits). Loops until verify passes clean."
+name: verify-triage-applytest-explore
+description: "Verify (GLM audits specs), triage (Kimi classifies issues), apply+test (Kimi fixes code), explore (Gemma diagnoses failures — no code edits). Loops until verify passes clean."
 
 models:
   verify: glm-5.1:cloud
+  triage: kimi-k2.6:cloud
   applytest: kimi-k2.6:cloud
   explore: gemma4:31b-cloud
 
@@ -10,6 +11,7 @@ kawa_core_model: gemma4:31b-cloud
 
 agents:
   verify: verify-glm
+  triage: triage-kimi
   applytest: applytest-kimi
   explore: explore-gemma
 
@@ -24,10 +26,22 @@ states:
       - kawa-check
     transitions:
       CLEAN: COMPLETE
-      HAS_ISSUES: applytest
+      HAS_ISSUES: triage
+
+  triage:
+    description: "Classify verify issues: code fixes → Kimi, doc updates → self, scope increases → issues.md. Uses openspec-verify-change skill."
+    agent: triage-kimi
+    model: kimi-k2.6:cloud
+    tools: read,write,edit,bash,grep,find,ls
+    skills:
+      - openspec-verify-change
+    transitions:
+      HAS_CODE_FIXES: applytest
+      DOCS_ONLY: COMPLETE
+      CLEAN: COMPLETE
 
   applytest:
-    description: "Apply fixes from verify or explore threads. Uses openspec-apply-change, kawa-check, and kawa-clean skills."
+    description: "Apply fixes from triage or explore threads. Uses openspec-apply-change, kawa-check, and kawa-clean skills."
     agent: applytest-kimi
     model: kimi-k2.6:cloud
     tools: read,write,edit,bash,grep,find,ls
@@ -50,7 +64,7 @@ states:
       default: applytest
 
   COMPLETE:
-    description: "Verify passed clean. Cycle done."
+    description: "Verify passed clean or triage found no code fixes. Cycle done."
 
 guardrails:
   max_iterations: 3
@@ -71,7 +85,3 @@ orchestration:
   session_prefix: "opsx-"
   layout: "orchestrator (left) + active phase (right)"
   phases_run_as: "pi subprocess in tmux pane"
-  commands:
-    verify: "pi --agent verify-glm --no-session -p '$ORIGINAL'"
-    applytest: "echo '$INPUT' | pi --agent applytest-kimi --no-session -p 'Fix these issues. ORIGINAL: $ORIGINAL'"
-    explore: "echo '$INPUT' | pi --agent explore-gemma --no-session -p 'Diagnose these failures. ORIGINAL: $ORIGINAL'"

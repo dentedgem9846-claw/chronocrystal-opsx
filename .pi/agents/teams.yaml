@@ -1,4 +1,5 @@
-verify-applytest-explore:
+verify-triage-applytest-explore:
   - verify-glm
+  - triage-kimi
   - applytest-kimi
   - explore-gemma

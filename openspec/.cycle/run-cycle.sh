@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run the opsx verify-applytest-explore cycle for a change
+# Run the opsx verify → triage → apply+test → explore cycle for a change
 # Usage: bash run-cycle.sh <change-name>
 
 set -euo pipefail
@@ -8,18 +8,21 @@ CHANGE_NAME="${1:?Usage: bash run-cycle.sh <change-name>}"
 PROJECT_DIR="/home/exedev/chronocrystal"
 KAWA_DIR="$PROJECT_DIR/flux/kawa"
 CYCLE_DIR="$PROJECT_DIR/openspec/changes/$CHANGE_NAME/.cycle"
-ORIGINAL="$CHANGE_NAME: create testing session with boxlite - e2e smoke tests for Kawa"
 
+# Derive ORIGINAL from the change proposal (first line of proposal.md)
+ORIGINAL=$(head -3 "$PROJECT_DIR/openspec/changes/$CHANGE_NAME/proposal.md" 2>/dev/null | tr '\n' ' ' || echo "$CHANGE_NAME")
+
+# Clean previous cycle artifacts
+rm -rf "$CYCLE_DIR"/*
 mkdir -p "$CYCLE_DIR"
 
 # Helper: git commit
 commit() {
   local phase="$1"
   local iteration="$2"
-  cd "$KAWA_DIR"
+  cd "$PROJECT_DIR"
   git add -A
   git commit -m "opsx: $phase $iteration for $CHANGE_NAME" --allow-empty 2>/dev/null || true
-  cd "$PROJECT_DIR"
 }
 
 # Helper: run pi agent
@@ -54,7 +57,6 @@ run_agent() {
       if $in_skills; then
         if [[ "$line" =~ ^[[:space:]]+-[[:space:]]+(.*) ]]; then
           local skill_name="${BASH_REMATCH[1]}"
-          # pi --skill takes a path to skill directory (containing SKILL.md) or file
           skill_flags="$skill_flags --skill $PROJECT_DIR/.pi/skills/$skill_name"
         elif [[ ! "$line" =~ ^[[:space:]] ]]; then
           in_skills=false
@@ -96,7 +98,7 @@ while [ "$ITERATION" -le "$MAX_ITERATIONS" ]; do
   case "$STATE" in
     verify)
       echo "Phase: VERIFY (GLM 5.1)"
-      OUTPUT=$(run_agent "verify-glm" "ollama/glm-5.1:cloud" "read,grep,find,ls,bash" "Verify the change '$CHANGE_NAME' using the openspec-verify-change skill. Check specs, tasks, and design against actual code. Run kawa-check (check.sh). ORIGINAL: $ORIGINAL" 2>&1)
+      OUTPUT=$(run_agent "verify-glm" "ollama/glm-5.1:cloud" "read,grep,find,ls,bash" "Verify the change '$CHANGE_NAME' using the openspec-verify-change skill. Check specs, tasks, and design against actual code. Run kawa-check (npm run check). ORIGINAL: $ORIGINAL" 2>&1)
       echo "$OUTPUT"
       echo "$OUTPUT" > "$CYCLE_DIR/${ITERATION}-verify.txt"
 
@@ -106,17 +108,42 @@ while [ "$ITERATION" -le "$MAX_ITERATIONS" ]; do
         STATE="COMPLETE"
         break
       else
-        echo "VERIFY HAS_ISSUES — proceeding to apply+test"
+        echo "VERIFY HAS_ISSUES — proceeding to triage"
         commit "verify" "$ITERATION"
+        STATE="triage"
+      fi
+      ;;
+
+    triage)
+      echo "Phase: TRIAGE (Kimi K2.6)"
+      PREV=$(cat "$CYCLE_DIR/${ITERATION}-verify.txt")
+
+      OUTPUT=$(run_agent "triage-kimi" "ollama/kimi-k2.6:cloud" "read,write,edit,bash,grep,find,ls" "Classify the verification issues below. Fix docs yourself, route code fixes to Kimi, file scope increases in issues.md. Use openspec-verify-change for change context. ORIGINAL: $ORIGINAL PREVIOUS PHASE OUTPUT: $PREV" 2>&1)
+      echo "$OUTPUT"
+      echo "$OUTPUT" > "$CYCLE_DIR/${ITERATION}-triage.txt"
+
+      if echo "$OUTPUT" | grep -q "ASSESSMENT: HAS_CODE_FIXES"; then
+        echo "TRIAGE found code fixes — proceeding to apply+test"
+        commit "triage" "$ITERATION"
         STATE="applytest"
+      elif echo "$OUTPUT" | grep -q "ASSESSMENT: DOCS_ONLY"; then
+        echo "TRIAGE fixed docs only — cycle complete"
+        commit "triage" "$ITERATION"
+        STATE="COMPLETE"
+        break
+      else
+        echo "TRIAGE found nothing to fix — cycle complete"
+        commit "triage" "$ITERATION"
+        STATE="COMPLETE"
+        break
       fi
       ;;
 
     applytest)
       echo "Phase: APPLY & TEST (Kimi K2.6)"
-      # Get the last verify or explore output
-      if [ -f "$CYCLE_DIR/${ITERATION}-verify.txt" ]; then
-        PREV=$(cat "$CYCLE_DIR/${ITERATION}-verify.txt")
+      # Get the last triage or explore output
+      if [ -f "$CYCLE_DIR/${ITERATION}-triage.txt" ]; then
+        PREV=$(cat "$CYCLE_DIR/${ITERATION}-triage.txt")
       elif [ -f "$CYCLE_DIR/${ITERATION}-explore.txt" ]; then
         PREV=$(cat "$CYCLE_DIR/${ITERATION}-explore.txt")
       else
@@ -141,11 +168,7 @@ while [ "$ITERATION" -le "$MAX_ITERATIONS" ]; do
 
     explore)
       echo "Phase: EXPLORE (Gemma 4 31B)"
-      if [ -f "$CYCLE_DIR/${ITERATION}-applytest.txt" ]; then
-        PREV=$(cat "$CYCLE_DIR/${ITERATION}-applytest.txt")
-      else
-        PREV=$(cat "$CYCLE_DIR/${ITERATION}-applytest.txt" 2>/dev/null || echo "No previous output found")
-      fi
+      PREV=$(cat "$CYCLE_DIR/${ITERATION}-applytest.txt" 2>/dev/null || echo "No previous output found")
 
       OUTPUT=$(run_agent "explore-gemma" "ollama/gemma4:31b-cloud" "read,grep,find,ls" "Diagnose the test failures listed below. Use the openspec-explore skill to get oriented on the change. Suggest threads for Kimi to fix. Do NOT modify any files. ORIGINAL: $ORIGINAL PREVIOUS PHASE OUTPUT: $PREV" 2>&1)
       echo "$OUTPUT"
@@ -165,6 +188,13 @@ fi
 echo ""
 echo "=== Cycle output files ==="
 ls -la "$CYCLE_DIR/"
+
+# Show issues.md if it was created
+if [ -f "$PROJECT_DIR/openspec/changes/$CHANGE_NAME/issues.md" ]; then
+  echo ""
+  echo "=== Issues filed (scope increases) ==="
+  cat "$PROJECT_DIR/openspec/changes/$CHANGE_NAME/issues.md"
+fi
 
 echo ""
 echo "=== Final state: $STATE ==="
