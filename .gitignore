@@ -1,5 +1,7 @@
-flux/kawa/
 node_modules/
 *.html
 pi-session-*
-.pi-settings.jsonflux/kawa/
+.pi-settings.json
+dist/
+flux/kawa/.pi/sessions/
+flux/kawa/.pi/auth.json

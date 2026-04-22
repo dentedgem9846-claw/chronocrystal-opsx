@@ -1,0 +1,29 @@
+{
+  "providers": {
+    "ollama": {
+      "baseUrl": "http://localhost:11434/v1",
+      "api": "openai-completions",
+      "apiKey": "not-needed",
+      "models": [
+        {
+          "id": "kimi-k2.6:cloud",
+          "name": "Kimi K2.6 Cloud",
+          "api": "openai-completions",
+          "reasoning": true
+        },
+        {
+          "id": "glm-5.1:cloud",
+          "name": "GLM 5.1 Cloud",
+          "api": "openai-completions",
+          "reasoning": false
+        },
+        {
+          "id": "gemma4:31b-cloud",
+          "name": "Gemma 4 31B Cloud",
+          "api": "openai-completions",
+          "reasoning": false
+        }
+      ]
+    }
+  }
+}
