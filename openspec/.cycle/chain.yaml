@@ -34,6 +34,7 @@ states:
     model: kimi-k2.6:cloud
     tools: read,write,edit,bash,grep,find,ls
     skills:
+      - openspec-triage-change
       - openspec-verify-change
     transitions:
       HAS_CODE_FIXES: applytest
