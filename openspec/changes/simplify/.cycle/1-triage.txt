@@ -1,0 +1,24 @@
+After reviewing the change artifacts and verify output, here is the classification:
+
+---
+
+**ROUTED TO KIMI:**
+
+WARNING: `flux/kawa/src/message-sender.ts:105` — `finalizeLiveMessage` does not transition state to IDLE when `liveMessageItemId` is null. The spec scenario "Finalize when live message item ID is null" explicitly requires the contact state to transition from STREAMING to IDLE, but the current implementation only resets `liveMessageState`/`liveMessageItemId`/`accumulatedText` inside the `ctx.liveMessageItemId !== null` guard. When `startLiveMessage` fails (returns null) and `agent_end` later fires, the contact remains permanently stuck in STREAMING state. This is a spec-contradicting bug in the existing implementation and must be fixed before archive. (in scope — spec'd behavior is incomplete)
+
+Fix: Restructure `finalizeLiveMessage` so the state reset (`liveMessageState = "IDLE"`, `liveMessageItemId = null`, `accumulatedText = ""`) runs whenever `liveMessageState === "STREAMING"`, regardless of whether `liveMessageItemId` is null. The `updateLiveMessageCmd` call should remain guarded by the null check.
+
+---
+
+**DOCUMENTATION UPDATED:**
+- (none — tasks, design, and specs are coherent; no numbering gaps or stale checkboxes)
+
+---
+
+**FILED AS ISSUES (scope increase — not for this cycle):**
+- ISSUE-001 (already in `issues.md`): Add unit tests for MessageSender — missing spec / new feature
+- ISSUE-002 (already in `issues.md`): Enforce MessageSender API boundary by making `updateLiveMessageCmd` private — architectural change
+
+---
+
+**ASSESSMENT: HAS_CODE_FIXES**
