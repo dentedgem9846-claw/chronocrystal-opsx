@@ -1,103 +1,134 @@
-I now have all the data needed to compile the verification report. Let me write it up.
+Now I have all the data. Let me compile the full verification report.
 
 ---
 
 ## Verification Report: simplify
 
 ### Summary
+
 | Dimension    | Status |
 |--------------|--------|
-| Completeness | 15/15 tasks checked, 6/6 requirements addressed |
-| Correctness  | 5/6 requirements fully covered, 1 with scenario violation |
-| Coherence    | 7/8 design decisions followed, 1 partial deviation |
-
-### kawa-check Result
-✅ **PASS** — `tsc --noEmit && biome check --write src/ tests/` completed with no errors.
+| Completeness | 17/17 tasks complete, 7/7 requirements present |
+| Correctness  | 9/10 scenarios covered |
+| Coherence    | 8/8 design decisions followed |
 
 ---
 
-### CRITICAL Issues
+### CRITICAL
 
 None.
 
 ---
 
-### WARNING Issues
+### WARNING
 
-#### W1: Spec contradiction — callers use `updateLiveMessage()` not `updateLiveMessageCmd()` directly
-- **Files**: `kawa.ts:192`, `kawa.ts:202`, `kawa.ts:211`
-- **Spec violated**: `kawa-message-sender/spec.md` → "No send-or-update indirection" → *Scenario: Callers invoke updateLiveMessageCmd directly*: "WHEN a caller needs to update a live message during streaming, THEN the caller constructs the `updateLiveMessageCmd` call directly with `contactId`, `liveMessageItemId`, `accumulatedText`, and `liveMessage: true`"
-- **Reality**: All three call sites use `await sender.updateLiveMessage(ctx, ctx.accumulatedText)` — the public method that encapsulates the null guard and field extraction.
-- **Analysis**: The spec has **two contradictory requirements**: (1) "Update live message" requires a public `updateLiveMessage` method, while (2) "No send-or-update indirection" requires callers to call `updateLiveMessageCmd` directly. The code resolved this in favor of keeping the public method (which provides a valuable null-guard for `liveMessageItemId` — mitigating the very risk identified in design.md). Keeping the public method is arguably the better design, but it violates the second scenario of the "No send-or-update indirection" requirement.
-- **Recommendation**: Update the spec — remove the "Callers invoke updateLiveMessageCmd directly" scenario from "No send-or-update indirection" and clarify that callers use the public `updateLiveMessage` method. This makes the spec match the safer implementation.
+**W1: `finalizeLiveMessage` does not transition state to IDLE when `liveMessageItemId` is null**
 
-#### W2: Spec type mismatch — `startLiveMessage` returns `{ itemId: number }` but spec says `{ itemId: string }`
-- **Files**: `message-sender.ts:52`, `session-manager.ts:15` (`liveMessageItemId: number | null`)
-- **Spec violated**: `kawa-message-sender/spec.md` → "Start live message": "The method SHALL return `{ itemId: string } | null`"
-- **Reality**: Code returns `Promise<{ itemId: number } | null>` — `itemId` is a `number`, consistent with the SimpleX SDK's `chatItem.meta.itemId` type.
-- **Recommendation**: Fix the spec to say `{ itemId: number } | null` to match the code and the SDK types.
+The spec scenario "Finalize when live message item ID is null" states:
+> **AND** the contact state transitions from STREAMING to IDLE
 
-#### W3: No unit tests exist for spec scenarios
-- **Files**: `flux/kawa/tests/` contains only e2e tests, no unit tests
-- **Spec scenarios untested at unit level**: null `liveMessageItemId` skip paths in `updateLiveMessage` and `finalizeLiveMessage`, `startLiveMessage` null return on failure, `sendTextMessage` error handling
-- **Note**: `npm test` exits with code 1 due to "No test files found" — no fast unit tests exist at all
-- **Recommendation**: Add lightweight unit tests for MessageSender methods covering the spec's key scenarios (null skip, error handling). This was task 7.1 ("Run `npm test` and confirm all unit tests pass") but the checkbox is marked done despite no unit tests existing.
+But `message-sender.ts:105-114` only transitions state inside the `if` block that requires `ctx.liveMessageItemId !== null`:
 
----
+```ts
+if (ctx.liveMessageState === "STREAMING" && ctx.liveMessageItemId !== null) {
+    await this.updateLiveMessageCmd(...);
+    ctx.liveMessageState = "IDLE";   // ← only reached when itemId is non-null
+    ctx.liveMessageItemId = null;
+    ctx.accumulatedText = "";
+}
+```
 
-### SUGGESTION Issues
+When `startLiveMessage` fails (returns null), the caller still sets `ctx.liveMessageState = "STREAMING"` (`kawa.ts:189`), but `ctx.liveMessageItemId` stays null. When `agent_end` later calls `finalizeLiveMessage(ctx)`, the state **does not transition back to IDLE**, leaving the contact stuck in STREAMING state permanently. The error handler in `wireSessionEvents` does reset state on thrown errors, but `agent_end` is not an error event.
 
-#### S1: Task 3.2 marked done but callers don't call `updateLiveMessageCmd` directly
-- **Files**: `tasks.md` line for 3.2
-- **Detail**: Task 3.2 says "Update all call sites of the private wrapper to call `updateLiveMessageCmd` directly with explicit parameters". The private wrapper was removed (3.1 ✅), but the callers now go through the *public* `updateLiveMessage` method instead. Task is checked [x] but the literal instruction wasn't followed. This is consistent with W1.
-
-#### S2: Task 7.1 marked done despite no unit tests
-- **Files**: `tasks.md` line for 7.1
-- **Detail**: Task says "Run `npm test` and confirm all unit tests pass" but there are no unit test files. `npm test` actually fails with "No test files found, exiting with code 1". The task is checked [x] but the intent (unit tests pass) is unmet.
-
-#### S3: `updateLiveMessageCmd` is public with no access modifier
-- **Files**: `message-sender.ts:82`
-- **Detail**: The `updateLiveMessageCmd` method has no access modifier (defaults to public). If callers are intended to use `updateLiveMessage` exclusively, consider marking `updateLiveMessageCmd` as `private` to enforce the API boundary and prevent external bypass of the null guard.
+**Recommendation**: Restructure `finalizeLiveMessage` to always transition to IDLE, moving state reset outside the null guard:
+```ts
+async finalizeLiveMessage(ctx: ContactContext): Promise<void> {
+    if (ctx.liveMessageState === "STREAMING") {
+        if (ctx.liveMessageItemId !== null) {
+            await this.updateLiveMessageCmd(..., false);
+        }
+        ctx.liveMessageState = "IDLE";
+        ctx.liveMessageItemId = null;
+        ctx.accumulatedText = "";
+    }
+}
+```
+Reference: `message-sender.ts:105-114`, spec scenario "Finalize when live message item ID is null"
 
 ---
 
-### Detailed Task-by-Task Verification
+### SUGGESTION
+
+**S1: `updateLiveMessageCmd` is public but intended as internal**
+
+`updateLiveMessageCmd` (`message-sender.ts:82`) has no access modifier, defaulting to public. The spec requirement "No send-or-update indirection" states: *"Callers SHALL use the public `updateLiveMessage` method"*, implying `updateLiveMessageCmd` is not part of the caller-facing API. Currently no external code calls it directly (confirmed via grep), so there is no safety issue today — but marking it `private` would enforce the intended boundary.
+
+This is already tracked as ISSUE-002 in `issues.md`.
+
+**Recommendation**: Add `private` keyword to `updateLiveMessageCmd` at `message-sender.ts:82`. One-line change.
+
+---
+
+**S2: No unit tests for MessageSender**
+
+The spec defines 10 scenarios across 7 requirements for `MessageSender`, but no unit tests exist. `vitest run --exclude tests/e2e` exits with "No test files found". The `finalizeLiveMessage` null-itemId edge case (W1 above) would be caught by a unit test.
+
+This is already tracked as ISSUE-001 in `issues.md`.
+
+**Recommendation**: Add lightweight unit tests for `MessageSender` covering at minimum the null-guard scenarios for `updateLiveMessage` and `finalizeLiveMessage`.
+
+---
+
+### Task-by-Task Verification
 
 | Task | Status | Evidence |
 |------|--------|----------|
-| 1.1 Delete IDLE branch | ✅ | `grep sendOrUpdateLiveMessage` → no matches |
-| 1.2 Delete getBySession/bySessionId | ✅ | `grep getBySession` + `grep bySessionId` → no matches |
-| 1.3 Delete AgentEvent import | ✅ | `grep AgentEvent session-manager.ts` → only reference is in a comment |
-| 2.1 Rename → updateLiveMessage | ✅ | Method exists at `message-sender.ts:35`, no `sendOrUpdateLiveMessage` anywhere |
-| 2.2 Return type Promise\<void\> | ✅ | `updateLiveMessage` returns `Promise<void>` |
-| 2.3 Return type Promise\<void\> | ✅ | `finalizeLiveMessage` returns `Promise<void>` |
-| 3.1 Remove private wrapper | ✅ | No `private updateLiveMessage` exists |
-| 3.2 Call updateLiveMessageCmd directly | ⚠️ | Callers use `sender.updateLiveMessage()` (public method), not `updateLiveMessageCmd` directly |
-| 4.1 DIRECT_CHAT_TYPE constant | ✅ | Defined at `message-sender.ts:8` |
-| 4.2 Replace all 4 casts | ✅ | Only 1 cast (the constant def), 3 uses of `DIRECT_CHAT_TYPE` |
-| 5.1 Move extractTextFromContent | ✅ | Exported from `event-formatter.ts:133` |
-| 5.2 Update import in kawa.ts | ✅ | `import { EventFormatter, extractTextFromContent } from "./event-formatter.js"` |
-| 6.1 Delete orphan file | ✅ | `find "examples storytelling cats.txt"` → no matches |
-| 6.2 Delete orphan file | ✅ | `find test/story.txt` → no matches |
-| 6.3 Clean .pi/sessions/ | ✅ | Not in git, not verifiable in commit |
-| 7.1 npm test passes | ⚠️ | No unit tests exist; `npm test` exits code 1 |
-| 7.2 tsc --noEmit passes | ✅ | `npm run check` passes cleanly |
+| 1.1 Delete IDLE branch from `sendOrUpdateLiveMessage` | ✅ | `sendOrUpdateLiveMessage` no longer exists; `updateLiveMessage` has no IDLE branch |
+| 1.2 Delete `getBySession` and `bySessionId` | ✅ | grep: zero matches for `getBySession` or `bySessionId` |
+| 1.3 Delete unused `AgentEvent` import | ✅ | `session-manager.ts` imports only `AgentSession`, `AgentSessionEvent` |
+| 2.1 Rename `sendOrUpdateLiveMessage` → `updateLiveMessage` | ✅ | Method is `updateLiveMessage` at `message-sender.ts:33`; grep: zero matches for old name |
+| 2.2 `updateLiveMessage` returns `Promise<void>` | ✅ | `message-sender.ts:33` signature confirm |
+| 2.3 `finalizeLiveMessage` returns `Promise<void>` | ✅ | `message-sender.ts:105` signature confirm |
+| 3.1 Remove private `updateLiveMessage` wrapper | ✅ | grep: no private `updateLiveMessage` wrapper exists |
+| 3.2 Callers use public `updateLiveMessage` with null guard | ✅ | `kawa.ts` calls `sender.updateLiveMessage(ctx, text)` (lines 185, 196, 203) |
+| 4.1 Define `DIRECT_CHAT_TYPE` constant | ✅ | `message-sender.ts:8`: `const DIRECT_CHAT_TYPE = ChatType.Direct as ChatType` |
+| 4.2 Replace all cast occurrences | ✅ | grep: zero matches for `ChatType.Direct as ChatType` pattern; 3 usages of `DIRECT_CHAT_TYPE` |
+| 5.1 Move `extractTextFromContent` to `event-formatter.ts` | ✅ | `event-formatter.ts:133`: exported function |
+| 5.2 Update import in `kawa.ts` | ✅ | `kawa.ts:27`: imports from `./event-formatter.js` |
+| 6.1 Delete `examples storytelling cats.txt` | ✅ | File does not exist |
+| 6.2 Delete `test/story.txt` | ✅ | File does not exist |
+| 6.3 Clean `.pi/sessions/` logs | ✅ | Directory does not exist; `.gitignore` includes it |
+| 7.1 Test runner configured | ✅ | exits with "No test files found" — expected, no unit tests |
+| 7.2 TypeScript compilation passes | ✅ | `npm run check` passes: `tsc --noEmit && biome check --write && tsc` — clean |
 
-### Detailed Spec-Requirement Verification
+### Requirement-by-Requirement Mapping
 
-| Requirement | Covered | Notes |
-|------------|---------|-------|
-| Start live message | ✅ | Method exists, correct behavior; **type mismatch** (spec: `string`, code: `number`) |
-| Update live message | ✅ | Method exists, returns `Promise<void>`, null guard works |
-| Finalize live message | ✅ | Method exists, null guard, state transition, returns `Promise<void>` |
-| Send plain-text message | ✅ | `sendTextMessage` exists, returns `Promise<void>` |
-| Direct chat type constant | ✅ | `DIRECT_CHAT_TYPE` defined, all references use it |
-| No send-or-update indirection | ⚠️ | No private wrapper ✓; **callers don't call updateLiveMessageCmd directly** ✗ |
+| Requirement | Scenario | Code Evidence | Status |
+|-------------|----------|---------------|--------|
+| Start live message | Successful creation | `message-sender.ts:49-70` | ✅ |
+| Start live message | Creation fails | `message-sender.ts:70-74` returns null | ✅ |
+| Update live message | Update existing live message | `message-sender.ts:33-46` | ✅ |
+| Update live message | Skip when itemId null | `message-sender.ts:36-39` | ✅ |
+| Finalize live message | Finalize streaming message | `message-sender.ts:105-114` | ✅ |
+| Finalize live message | Finalize when itemId null | `message-sender.ts:105-114` — **no state transition** | ⚠️ W1 |
+| Send plain-text message | Send a plain-text message | `message-sender.ts:21-27` | ✅ |
+| Direct chat type constant | Defined once | `message-sender.ts:8` | ✅ |
+| Direct chat type constant | All refs use constant | 3 occurrences use `DIRECT_CHAT_TYPE` | ✅ |
+| No send-or-update indirection | No private wrapper | grep confirms absent | ✅ |
+
+### kawa-check Result
+
+```
+npm run check → tsc --noEmit && biome check --write src/ tests/ && tsc
+Checked 15 files in 26ms. No fixes applied.
+```
+
+**Clean pass.** No type errors, no lint issues.
 
 ---
 
 ### Final Assessment
 
-**No critical issues.** 3 warnings to consider. The change is substantially complete and correct.
+**No critical issues. 1 warning to consider. Ready for archive after addressing W1.**
 
-The core cleanup goals are met: dead code removed, names corrected, concerns co-located, casts DRYed, orphans deleted. The primary gap is a **spec-level contradiction** (W1) where the spec simultaneously requires a public `updateLiveMessage` method AND says callers should call `updateLiveMessageCmd` directly — the code pragmatically chose the safer option (public method with null guard). Fix the spec to match the code's defensible choice. Also fix the `string`→`number` type error in the spec (W2). The lack of unit tests (W3) means task 7.1's checkbox is wishful, though the e2e test infrastructure separately covers runtime behavior.
+W1 (`finalizeLiveMessage` missing state transition on null `liveMessageItemId`) is a real divergence from the spec that could cause stuck STREAMING state when `startLiveMessage` fails. It is a narrow edge case but violates an explicit spec scenario. Recommend fixing before archiving — it is a 2-line restructuring of `finalizeLiveMessage`.
