@@ -4,6 +4,9 @@ import type { ChatClient } from "simplex-chat";
 import type { KawaConfig } from "./config.js";
 import type { ContactContext } from "./session-manager.js";
 
+/** Single constant for the repeated ChatType.Direct cast */
+const DIRECT_CHAT_TYPE = ChatType.Direct as ChatType;
+
 /**
  * Handles sending messages and live message updates to SimpleX contacts.
  * Encapsulates the live message state machine (IDLE → STREAMING → IDLE).
@@ -19,42 +22,28 @@ export class MessageSender {
 	 */
 	async sendTextMessage(contactId: number, text: string): Promise<void> {
 		try {
-			await this.chatClient.apiSendTextMessage(ChatType.Direct as ChatType, contactId, text);
+			await this.chatClient.apiSendTextMessage(DIRECT_CHAT_TYPE, contactId, text);
 		} catch (err) {
 			console.error(`[msg] Failed to send text message to contact ${contactId}:`, err);
 		}
 	}
 
 	/**
-	 * Start a new live message or update an existing one.
-	 * Handles the IDLE → STREAMING transition by creating a new live message.
-	 * Handles STREAMING updates by updating in place.
+	 * Update an existing live message (STREAMING state only).
+	 * The IDLE → STREAMING transition is handled by startLiveMessage.
 	 */
-	async sendOrUpdateLiveMessage(ctx: ContactContext, text: string): Promise<ContactContext> {
-		if (ctx.liveMessageState === "IDLE") {
-			// IDLE → STREAMING: create a new live message
-			try {
-				const chatItems = await this.chatClient.apiSendMessages(
-					ChatType.Direct as ChatType,
-					ctx.contactId,
-					[{ msgContent: { type: "text" as const, text }, mentions: {} }],
-				);
-				if (chatItems.length > 0) {
-					ctx.liveMessageItemId = chatItems[0].chatItem.meta.itemId;
-				}
-				ctx.liveMessageState = "STREAMING";
-				ctx.accumulatedText = text;
-			} catch (err) {
-				console.error(`[msg] Failed to create live message for contact ${ctx.contactId}:`, err);
-				// Fallback: send as regular message
-				await this.sendTextMessage(ctx.contactId, text);
-			}
-		} else {
-			// STREAMING: update existing live message
-			ctx.accumulatedText = text;
-			await this.updateLiveMessage(ctx);
+	async updateLiveMessage(ctx: ContactContext, text: string): Promise<void> {
+		ctx.accumulatedText = text;
+		if (ctx.liveMessageItemId === null) {
+			console.warn(`[msg] No live message item ID for contact ${ctx.contactId}, skipping update`);
+			return;
 		}
-		return ctx;
+		await this.updateLiveMessageCmd(
+			ctx.contactId,
+			ctx.liveMessageItemId,
+			ctx.accumulatedText,
+			true,
+		);
 	}
 
 	/**
@@ -64,7 +53,7 @@ export class MessageSender {
 		try {
 			const response = await this.chatClient.sendChatCmd(
 				T.CC.APISendMessages.cmdString({
-					sendRef: { chatType: ChatType.Direct as ChatType, chatId: contactId },
+					sendRef: { chatType: DIRECT_CHAT_TYPE, chatId: contactId },
 					liveMessage: true,
 					composedMessages: [{ msgContent: { type: "text" as const, text }, mentions: {} }],
 				}),
@@ -99,7 +88,7 @@ export class MessageSender {
 		try {
 			await this.chatClient.sendChatCmd(
 				T.CC.APIUpdateChatItem.cmdString({
-					chatRef: { chatType: ChatType.Direct as ChatType, chatId: contactId },
+					chatRef: { chatType: DIRECT_CHAT_TYPE, chatId: contactId },
 					chatItemId,
 					liveMessage,
 					updatedMessage: { msgContent: { type: "text" as const, text }, mentions: {} },
@@ -113,7 +102,7 @@ export class MessageSender {
 	/**
 	 * Finalize the current live message (STREAMING → IDLE).
 	 */
-	async finalizeLiveMessage(ctx: ContactContext): Promise<ContactContext> {
+	async finalizeLiveMessage(ctx: ContactContext): Promise<void> {
 		if (ctx.liveMessageState === "STREAMING" && ctx.liveMessageItemId !== null) {
 			await this.updateLiveMessageCmd(
 				ctx.contactId,
@@ -125,22 +114,5 @@ export class MessageSender {
 			ctx.liveMessageItemId = null;
 			ctx.accumulatedText = "";
 		}
-		return ctx;
-	}
-
-	/**
-	 * Update a live message in place (STREAMING state, liveMessage: true).
-	 */
-	private async updateLiveMessage(ctx: ContactContext): Promise<void> {
-		if (ctx.liveMessageItemId === null) {
-			console.warn(`[msg] No live message item ID for contact ${ctx.contactId}, skipping update`);
-			return;
-		}
-		await this.updateLiveMessageCmd(
-			ctx.contactId,
-			ctx.liveMessageItemId,
-			ctx.accumulatedText,
-			true,
-		);
 	}
 }

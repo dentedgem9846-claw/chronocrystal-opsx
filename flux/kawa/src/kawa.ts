@@ -24,7 +24,7 @@ import { ChatPeerType } from "@simplex-chat/types/dist/types.js";
 import { ChatClient } from "simplex-chat";
 import { CommandHandler } from "./commands.js";
 import { type KawaConfig, defaultConfig } from "./config.js";
-import { EventFormatter } from "./event-formatter.js";
+import { EventFormatter, extractTextFromContent } from "./event-formatter.js";
 import { MessageSender } from "./message-sender.js";
 import { type ContactContext, SessionManager } from "./session-manager.js";
 import { SimpleXProcess } from "./simplex-process.js";
@@ -189,7 +189,7 @@ async function handleAgentEvent(
 					ctx.liveMessageState = "STREAMING";
 				} else {
 					// STREAMING: update existing live message
-					await sender.sendOrUpdateLiveMessage(ctx, ctx.accumulatedText);
+					await sender.updateLiveMessage(ctx, ctx.accumulatedText);
 				}
 			}
 			break;
@@ -199,7 +199,7 @@ async function handleAgentEvent(
 			const append = formatter.formatEventAppend(event);
 			if (append) {
 				ctx.accumulatedText += append;
-				await sender.sendOrUpdateLiveMessage(ctx, ctx.accumulatedText);
+				await sender.updateLiveMessage(ctx, ctx.accumulatedText);
 			}
 			break;
 		}
@@ -208,7 +208,7 @@ async function handleAgentEvent(
 			const append = formatter.formatEventAppend(event);
 			if (append) {
 				ctx.accumulatedText += append;
-				await sender.sendOrUpdateLiveMessage(ctx, ctx.accumulatedText);
+				await sender.updateLiveMessage(ctx, ctx.accumulatedText);
 			}
 			break;
 		}
@@ -231,21 +231,6 @@ async function handleAgentEvent(
 			// These events don't produce visible output in chat
 			break;
 	}
-}
-
-/**
- * Extract text from a SimpleX chat item content.
- */
-function extractTextFromContent(content: {
-	type: string;
-	msgContent?: { type: string; text?: string };
-}): string | undefined {
-	if (content.type === "rcvMsgContent" && content.msgContent) {
-		if (content.msgContent.type === "text" && content.msgContent.text) {
-			return content.msgContent.text;
-		}
-	}
-	return undefined;
 }
 
 /**

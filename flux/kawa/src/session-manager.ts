@@ -1,4 +1,3 @@
-import type { AgentEvent } from "@mariozechner/pi-agent-core";
 import type { AgentSession, AgentSessionEvent } from "@mariozechner/pi-coding-agent";
 
 /**
@@ -27,7 +26,6 @@ export interface ContactContext {
  */
 export class SessionManager {
 	private byContactId = new Map<number, ContactContext>();
-	private bySessionId = new Map<AgentSession, ContactContext>();
 
 	constructor(private maxSessions: number) {}
 
@@ -39,7 +37,6 @@ export class SessionManager {
 			return false;
 		}
 		this.byContactId.set(ctx.contactId, ctx);
-		this.bySessionId.set(ctx.session, ctx);
 		return true;
 	}
 
@@ -51,20 +48,12 @@ export class SessionManager {
 	}
 
 	/**
-	 * Get context by AgentSession instance.
-	 */
-	getBySession(session: AgentSession): ContactContext | undefined {
-		return this.bySessionId.get(session);
-	}
-
-	/**
 	 * Remove a contact context and clean up.
 	 */
 	removeByContactId(contactId: number): ContactContext | undefined {
 		const ctx = this.byContactId.get(contactId);
 		if (ctx) {
 			this.byContactId.delete(contactId);
-			this.bySessionId.delete(ctx.session);
 			ctx.unsubscribe?.();
 		}
 		return ctx;
@@ -92,6 +81,5 @@ export class SessionManager {
 			ctx.unsubscribe?.();
 		}
 		this.byContactId.clear();
-		this.bySessionId.clear();
 	}
 }

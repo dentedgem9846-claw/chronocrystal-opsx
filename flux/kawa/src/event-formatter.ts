@@ -125,3 +125,19 @@ export class EventFormatter {
 		return "";
 	}
 }
+
+/**
+ * Extract text from a SimpleX chat item content.
+ * Used to parse incoming messages from SimpleX contacts.
+ */
+export function extractTextFromContent(content: {
+	type: string;
+	msgContent?: { type: string; text?: string };
+}): string | undefined {
+	if (content.type === "rcvMsgContent" && content.msgContent) {
+		if (content.msgContent.type === "text" && content.msgContent.text) {
+			return content.msgContent.text;
+		}
+	}
+	return undefined;
+}
