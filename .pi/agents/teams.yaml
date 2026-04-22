@@ -1,0 +1,4 @@
+verify-applytest-explore:
+  - verify-glm
+  - applytest-kimi
+  - explore-gemma

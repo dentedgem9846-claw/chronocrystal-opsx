@@ -1,0 +1,68 @@
+name: verify-applytest-explore
+description: "Verify (GLM audits specs), apply+test (Kimi fixes and runs e2e), explore (Gemma diagnoses failures — no code edits). Loops until verify passes clean."
+
+models:
+  verify: glm-5.1:cloud
+  applytest: kimi-k2.6:cloud
+  explore: gemma4:31b-cloud
+
+kawa_core_model: gemma4:31b-cloud
+
+agents:
+  verify: verify-glm
+  applytest: applytest-kimi
+  explore: explore-gemma
+
+states:
+  verify:
+    description: "Audit specs, tasks, and code. Run check.sh."
+    agent: verify-glm
+    model: glm-5.1:cloud
+    tools: read,grep,find,ls,bash
+    transitions:
+      CLEAN: COMPLETE
+      HAS_ISSUES: applytest
+
+  applytest:
+    description: "Apply fixes from verify or explore threads. Build and run smoke suite."
+    agent: applytest-kimi
+    model: kimi-k2.6:cloud
+    tools: read,write,edit,bash,grep,find,ls
+    transitions:
+      ALL_PASSED: verify
+      HAS_FAILURES: explore
+
+  explore:
+    description: "Investigate failures, suggest threads. Read-only — no code edits."
+    agent: explore-gemma
+    model: gemma4:31b-cloud
+    tools: read,grep,find,ls
+    transitions:
+      default: applytest
+
+  COMPLETE:
+    description: "Verify passed clean. Cycle done."
+
+guardrails:
+  max_iterations: 3
+  anti_loop: "If verify and applytest alternate more than 3 times without progress, force human intervention"
+  requires_approval: false
+  git_commit_on_handoff: true
+  git_commit_message_template: "opsx: <phase> <iteration> for <change>"
+
+handoff:
+  method: text_pipe
+  description: "Output of previous agent is piped as $INPUT to next agent. $ORIGINAL (initial user request) is carried through all phases."
+  variables:
+    $INPUT: "Output text from the previous phase agent"
+    $ORIGINAL: "The user's initial request — carried unchanged through all phases"
+
+orchestration:
+  method: tmux
+  session_prefix: "opsx-"
+  layout: "orchestrator (left) + active phase (right)"
+  phases_run_as: "pi subprocess in tmux pane"
+  commands:
+    verify: "pi --agent verify-glm --no-session -p '$ORIGINAL'"
+    applytest: "echo '$INPUT' | pi --agent applytest-kimi --no-session -p 'Fix these issues. ORIGINAL: $ORIGINAL'"
+    explore: "echo '$INPUT' | pi --agent explore-gemma --no-session -p 'Diagnose these failures. ORIGINAL: $ORIGINAL'"
