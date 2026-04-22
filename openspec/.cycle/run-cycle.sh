@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # Run the opsx verify → triage → apply+test → explore cycle for a change
 # Usage: bash run-cycle.sh <change-name>
+#
+# The cycle runs until verify reports CLEAN — all issues must be addressed either
+# by fixing them in code/docs or by filing them as scope increases in issues.md.
+# No phase may declare the cycle complete except verify with ASSESSMENT: CLEAN.
 
 set -euo pipefail
 
@@ -89,8 +93,10 @@ echo "Monitor with: tmux attach -t $SESSION"
 echo ""
 
 ITERATION=1
-MAX_ITERATIONS=3
+MAX_ITERATIONS=5
 STATE="verify"
+PREV_VERIFY=""
+PREV_TRIAGE=""
 
 while [ "$ITERATION" -le "$MAX_ITERATIONS" ]; do
   echo "=== Iteration $ITERATION — State: $STATE ==="
@@ -98,9 +104,17 @@ while [ "$ITERATION" -le "$MAX_ITERATIONS" ]; do
   case "$STATE" in
     verify)
       echo "Phase: VERIFY (GLM 5.1)"
-      OUTPUT=$(run_agent "verify-glm" "ollama/glm-5.1:cloud" "read,grep,find,ls,bash" "Verify the change '$CHANGE_NAME' using the openspec-verify-change skill. Check specs, tasks, and design against actual code. Run kawa-check (npm run check). ORIGINAL: $ORIGINAL" 2>&1)
+      # Build focused prompt: if re-verifying, tell the agent what to re-check
+      if [ -n "$PREV_VERIFY" ]; then
+        VERIFY_PROMPT="Re-verify the change '$CHANGE_NAME' using the openspec-verify-change skill. Focus on confirming whether the issues from the previous verification have been addressed (by fixes or by filing in issues.md). Run kawa-check (npm run check). PREVIOUS ISSUES: $PREV_VERIFY ORIGINAL: $ORIGINAL"
+      else
+        VERIFY_PROMPT="Verify the change '$CHANGE_NAME' using the openspec-verify-change skill. Check specs, tasks, and design against actual code. Run kawa-check (npm run check). ORIGINAL: $ORIGINAL"
+      fi
+      OUTPUT=$(run_agent "verify-glm" "ollama/glm-5.1:cloud" "read,grep,find,ls,bash" "$VERIFY_PROMPT" 2>&1)
       echo "$OUTPUT"
       echo "$OUTPUT" > "$CYCLE_DIR/${ITERATION}-verify.txt"
+      # Carry forward for next iteration
+      PREV_VERIFY=$(echo "$OUTPUT" | grep -E '^(CRITICAL|WARNING|W[0-9]+)' | head -20)
 
       if echo "$OUTPUT" | grep -q "ASSESSMENT: CLEAN"; then
         echo "VERIFY CLEAN — cycle complete!"
@@ -117,8 +131,13 @@ while [ "$ITERATION" -le "$MAX_ITERATIONS" ]; do
     triage)
       echo "Phase: TRIAGE (Kimi K2.6)"
       PREV=$(cat "$CYCLE_DIR/${ITERATION}-verify.txt")
+      # Tell triage which issues were already filed so it doesn't re-classify them
+      ISSUES_CONTEXT=""
+      if [ -f "$PROJECT_DIR/openspec/changes/$CHANGE_NAME/issues.md" ]; then
+        ISSUES_CONTEXT="Already filed in issues.md (do not re-file these): $(cat "$PROJECT_DIR/openspec/changes/$CHANGE_NAME/issues.md")"
+      fi
 
-      OUTPUT=$(run_agent "triage-kimi" "ollama/kimi-k2.6:cloud" "read,write,edit,bash,grep,find,ls" "Classify the verification issues below. Fix docs yourself, route code fixes to Kimi, file scope increases in issues.md. Use openspec-verify-change for change context. ORIGINAL: $ORIGINAL PREVIOUS PHASE OUTPUT: $PREV" 2>&1)
+      OUTPUT=$(run_agent "triage-kimi" "ollama/kimi-k2.6:cloud" "read,write,edit,bash,grep,find,ls" "Classify the verification issues below. Fix docs yourself, route code fixes to Kimi, file scope increases in issues.md. Use openspec-verify-change for change context. $ISSUES_CONTEXT ORIGINAL: $ORIGINAL PREVIOUS PHASE OUTPUT: $PREV" 2>&1)
       echo "$OUTPUT"
       echo "$OUTPUT" > "$CYCLE_DIR/${ITERATION}-triage.txt"
 
@@ -127,15 +146,15 @@ while [ "$ITERATION" -le "$MAX_ITERATIONS" ]; do
         commit "triage" "$ITERATION"
         STATE="applytest"
       elif echo "$OUTPUT" | grep -q "ASSESSMENT: DOCS_ONLY"; then
-        echo "TRIAGE fixed docs only — cycle complete"
+        echo "TRIAGE fixed docs only — looping back to verify"
         commit "triage" "$ITERATION"
-        STATE="COMPLETE"
-        break
+        STATE="verify"
+        ITERATION=$((ITERATION + 1))
       else
-        echo "TRIAGE found nothing to fix — cycle complete"
+        echo "TRIAGE found nothing to fix — looping back to verify"
         commit "triage" "$ITERATION"
-        STATE="COMPLETE"
-        break
+        STATE="verify"
+        ITERATION=$((ITERATION + 1))
       fi
       ;;
 

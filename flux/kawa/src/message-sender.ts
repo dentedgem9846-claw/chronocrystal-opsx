@@ -103,13 +103,15 @@ export class MessageSender {
 	 * Finalize the current live message (STREAMING → IDLE).
 	 */
 	async finalizeLiveMessage(ctx: ContactContext): Promise<void> {
-		if (ctx.liveMessageState === "STREAMING" && ctx.liveMessageItemId !== null) {
-			await this.updateLiveMessageCmd(
-				ctx.contactId,
-				ctx.liveMessageItemId,
-				ctx.accumulatedText,
-				false,
-			);
+		if (ctx.liveMessageState === "STREAMING") {
+			if (ctx.liveMessageItemId !== null) {
+				await this.updateLiveMessageCmd(
+					ctx.contactId,
+					ctx.liveMessageItemId,
+					ctx.accumulatedText,
+					false,
+				);
+			}
 			ctx.liveMessageState = "IDLE";
 			ctx.liveMessageItemId = null;
 			ctx.accumulatedText = "";
