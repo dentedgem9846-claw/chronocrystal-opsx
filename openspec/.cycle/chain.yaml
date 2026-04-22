@@ -35,7 +35,6 @@ states:
     tools: read,write,edit,bash,grep,find,ls
     skills:
       - openspec-triage-change
-      - openspec-verify-change
     transitions:
       HAS_CODE_FIXES: applytest
       DOCS_ONLY: COMPLETE

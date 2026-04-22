@@ -54,7 +54,7 @@ Triage classifies every verify issue into three buckets:
 | Phase | Agent File | Model | Tools | Skills |
 |-------|-----------|-------|-------|--------|
 | Verify | `.pi/agents/verify-glm.md` | glm-5.1:cloud | read,grep,find,ls,bash | openspec-verify-change, kawa-check |
-| Triage | `.pi/agents/triage-kimi.md` | kimi-k2.6:cloud | read,write,edit,bash,grep,find,ls | openspec-triage-change, openspec-verify-change |
+| Triage | `.pi/agents/triage-kimi.md` | kimi-k2.6:cloud | read,write,edit,bash,grep,find,ls | openspec-triage-change |
 | Apply & Test | `.pi/agents/applytest-kimi.md` | kimi-k2.6:cloud | read,write,edit,bash,grep,find,ls | openspec-apply-change, kawa-check, kawa-clean |
 | Explore | `.pi/agents/explore-gemma.md` | gemma4:31b-cloud | read,grep,find,ls | openspec-explore |
 
