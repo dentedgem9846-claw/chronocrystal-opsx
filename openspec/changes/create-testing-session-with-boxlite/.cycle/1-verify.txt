@@ -1,0 +1,157 @@
+Now I have a complete picture. Let me compile the full verification report.
+
+---
+
+# Verification Report: `create-testing-session-with-boxlite`
+
+## Change Summary
+**Original description:** Create testing session with boxlite - e2e smoke tests for Kawa
+
+The change encompasses: (1) removing the shadow message queue (bug fix), (2) replacing `/reset` with `/new`, (3) adding an HTTP address API on port 8080, and (4) building e2e smoke tests where Alice talks to a real Kawa via SimpleX.
+
+---
+
+## Task-by-Task Verification
+
+### ✅ 1. Remove Shadow Message Queue — ALL PASS
+
+| Task | Status | Evidence |
+|------|--------|----------|
+| 1.1 Delete `messageQueue`, `isProcessing` from `ContactContext` | ✅ | `ContactContext` in `session-manager.ts` has no `messageQueue` or `isProcessing` fields — only `contactId`, `session`, `liveMessageItemId`, `accumulatedText`, `liveMessageState`, `unsubscribe` |
+| 1.2 Delete `processQueue()` from `kawa.ts` | ✅ | `grep` for `processQueue` returns no results in `src/` |
+| 1.3 Update `agent_end` handler | ✅ | `agent_end` case (line ~471) just finalizes the live message — no queue draining, no `isProcessing` flag |
+| 1.4 Update `handleIncomingMessage()` | ✅ | Uses `ctx.session.state.isStreaming ? followUp(text) : prompt(text)` — no queue, no depth check |
+| 1.5 Remove `maxQueueDepth` from `KawaConfig` and `defaultConfig` | ✅ | Not present in `config.ts` |
+| 1.6 Remove queue depth usage from `handleIncomingMessage` | ✅ | No "too many messages" branch exists |
+
+### ✅ 2. Replace `/reset` with `/new` — ALL PASS
+
+| Task | Status | Evidence |
+|------|--------|----------|
+| 2.1 Rename `/reset` → `/new` in switch | ✅ | `commands.ts` switch has `case "/new":` |
+| 2.2 Rename `handleReset()` → `handleNew()` | ✅ | Method is `handleNew()` |
+| 2.3 `await session.abort()` before `unsubscribe` | ✅ | `handleNew()` calls `await oldCtx.session.abort()` then `oldCtx.unsubscribe?.()` |
+| 2.4 Finalize stuck live message before abort | ✅ | Checks `liveMessageState === "STREAMING"` then calls `finalizeLiveMessage(oldCtx)` before `abort()` |
+| 2.5 Update `/help` text | ✅ | Help lists: `/new — Start a fresh session (aborts current if streaming)` |
+
+**Note on 2.3:** The code uses `getByContactId()` first, then manually aborts/unsubscribes, then calls `removeByContactId()`. Setting `oldCtx.unsubscribe = null` before `removeByContactId()` prevents double-unsubscribe since `removeByContactId` also calls `unsubscribe?.()`. This correctly implements the "avoid premature unsubscribe" intent.
+
+### ✅ 3. Add Kawa HTTP Address API — ALL PASS
+
+| Task | Status | Evidence |
+|------|--------|----------|
+| 3.1 `addressApiPort` in `KawaConfig` (default 8080) | ✅ | `config.ts`: `addressApiPort: number` with default `8080` |
+| 3.2 `KAWA_ADDRESS_PORT` env var | ✅ | `kawa.ts` line 264: `addressApiPort: Number(process.env.KAWA_ADDRESS_PORT ?? defaultConfig.addressApiPort)` |
+| 3.3 HTTP server using `node:http` | ✅ | `createApiServer()` uses `createServer` from `node:http` |
+| 3.4 `GET /address` → 200 or 503 | ✅ | Returns `kawaAddress` with 200 or `503 "Kawa is not ready yet"` |
+| 3.5 Store address in module-level variable | ✅ | `let kawaAddress: string | null = null` set in `setupBotProfile()` via `const address = await chatClient.apiCreateLink(...)` |
+| 3.6 Start HTTP server early in `main()` | ✅ | `createApiServer()` called at line 275, before `detectSimplexBin()` and before SimpleX process starts |
+
+**Bonus:** `POST /connect` endpoint also implemented (spec D3.1) with 200/400/503/500 responses. ✅
+
+### ✅ 4. E2E Test Infrastructure — ALL PASS
+
+| Task | Status | Evidence |
+|------|--------|----------|
+| 4.1 `vitest` dev dependency | ✅ | `"vitest": "^3.0.0"` in `package.json` devDependencies |
+| ~~4.2~~ | — | (Missing from task list — appears consolidated) |
+| 4.3 `"smoke"` npm script | ✅ | `"smoke": "vitest run --config vitest.e2e.config.ts"` |
+| 4.4 `vitest.e2e.config.ts` | ✅ | `testTimeout: 180000`, `hookTimeout: 180000`, `include: ["tests/e2e/**/*.test.ts"]` |
+| 4.5 `tests/e2e/setup.ts` | ✅ | Black-box: starts Kawa via env vars only, polls address API, connects Alice, waits for greeting |
+| 4.6 `tests/e2e/helpers.ts` | ✅ | `send()`, `waitForMessage()`, `resetSession()` |
+| 4.7 Platform detection | ✅ | `checkPrerequisites()` checks `simplex-chat` and `ollama`, throws with descriptive error |
+
+### ✅ 5. E2E Test User Stories — ALL PASS
+
+| Task | Status | Evidence |
+|------|--------|----------|
+| 5.1 `greeting.test.ts` | ✅ | Asserts 👋 and "coding agent" in greeting |
+| 5.2 `help.test.ts` | ✅ | Asserts `/help`, `/new`, `/compact`, `/status` in response |
+| 5.3 `simple-prompt.test.ts` | ✅ | Sends "What is 2+2?", matches `/\b4\b|four|2\s*\+\s*2/i` with "(Agent finished with no output)" fallback |
+| 5.4 `code-execution.test.ts` | ✅ | Sends file creation prompt, checks for 🔧 and `hello.txt`, verifies file on disk |
+| 5.5 `queued-messages.test.ts` | ✅ | Sends two messages during streaming, asserts both receive responses |
+| 5.6 `new-command.test.ts` | ✅ | Tests `/new` while idle and while streaming, verifies recovery after abort |
+
+### ✅ 6. Black-Box Test Isolation & Configuration — ALL PASS
+
+| Task | Status | Evidence |
+|------|--------|----------|
+| 6.1 `botDisplayName` config | ✅ | `KawaConfig.botDisplayName` with default `"Kawa"` and `KAWA_BOT_DISPLAY_NAME` env var |
+| 6.2 `simplexDataDir` config | ✅ | `KawaConfig.simplexDataDir` with default `""` and `KAWA_SIMPLEX_DATA_DIR` env var |
+| 6.3 Pass flags to simplex-chat | ✅ | `SimpleXProcess.spawnProcess()` passes `--create-bot-display-name` and `-d` when configured |
+| 6.4 No Kawa wrapper script | ✅ | Kawa started via `spawn("node", ["dist/kawa.js"])` with env vars — Alice still uses a wrapper (test infra, not SUT) |
+| 6.5 Prerequisite checks | ✅ | `checkPrerequisites()` throws on missing `simplex-chat` or `ollama` |
+| 6.6 Temp directory cleanup | ✅ | `teardownShared()` removes `KAWA_SIMPLEX_DIR`, `ALICE_SIMPLEX_DIR`, `ALICE_WRAPPER` |
+| 6.7 Operational scripts | ✅ | `scripts/{clean,check,start,stop}.sh` with corresponding `npm run` commands |
+
+---
+
+## Spec Scenario Verification
+
+### kawa-address-api/spec.md — ALL PASS
+
+| Scenario | Status | Evidence |
+|----------|--------|----------|
+| `GET /address` returns 200 after startup | ✅ | Returns `kawaAddress` with `Content-Type: text/plain` |
+| `GET /address` returns 503 before ready | ✅ | Returns `503 "Kawa is not ready yet"` when `kawaAddress` is null |
+| Address port configurable | ✅ | `KAWA_ADDRESS_PORT` env var |
+| Address server starts alongside SimpleX | ✅ | `createApiServer()` called before SimpleX process starts |
+
+### e2e-alice-testing/spec.md — ALL PASS (with minor deviations noted)
+
+| Scenario | Status | Notes |
+|----------|--------|-------|
+| `GET /address` returns connection link | ✅ | |
+| `GET /address` 503 before ready | ✅ | |
+| Address port configurable | ✅ | |
+| `POST /connect` initiates connection | ✅ | |
+| `POST /connect` missing link → 400 | ✅ | |
+| `POST /connect` when not ready → 503 | ✅ | |
+| `POST /connect` failure → 500 | ✅ | |
+| Smoke tests run separately from `npm test` | ✅ | `"test"` excludes e2e; `"smoke"` runs e2e |
+| Smoke test timeout ≥ 60s | ✅ | 180s (exceeds minimum) |
+| Kawa separate host process | ✅ | `spawn("node", ["dist/kawa.js"])` |
+| Alice separate host process | ✅ | Spawned as simplex-chat CLI process |
+| Both connect to public SMP relay | ✅ | No custom relay configuration |
+| Address API at `localhost:18080` | ✅ | `KAWA_ADDRESS_PORT = 18080` in tests |
+| Processes terminated + dirs cleaned | ✅ | `teardownShared()` kills processes and `rmSync` |
+| Test harness polls address API | ✅ | `pollKawaAddress()` |
+| `send` helper | ✅ | `send(text)` — uses module-level globals |
+| `waitForMessage` helper | ✅ | Polls `aliceHistory` with timeout |
+| `beforeAll`/`afterAll` lifecycle | ✅ | Each test file uses `beforeAll(setupShared)`/`afterAll(teardownShared)` |
+| `/new` between tests | ✅ | `resetSession()` in `afterEach` (new-command test); others use `setupShared` once |
+| Greeting contains 👋 and "coding agent" | ✅ | |
+| `/help` lists `/help`, `/new`, `/compact`, `/status` | ✅ | |
+| Simple prompt response | ✅ | |
+| Code execution with tool markers | ✅ | |
+| Queued messages all answered | ✅ | |
+| `/new` while idle → fresh session | ✅ | |
+| `/new` while streaming → abort + fresh | ✅ | |
+| Black-box: Kawa started with env vars only | ✅ | No wrapper script for Kawa |
+| Black-box: no production logic modified | ✅ | |
+| Black-box: data directory configurable | ✅ | `KAWA_SIMPLEX_DATA_DIR` env var |
+| Platform detection: fail on missing prereqs | ✅ | Throws descriptive error |
+
+---
+
+## Discrepancies (Minor, Non-Blocking)
+
+| # | Spec/Task | Code | Impact | Assessment |
+|---|-----------|------|--------|------------|
+| 1 | Design doc mentions `apiConnectByLink()` | Code uses `apiConnectActiveUser()` | Naming only — the SDK method is `apiConnectActiveUser()` | ⚠️ Spec naming should be updated, but functionally correct |
+| 2 | Task 4.4 says `testTimeout: 60000`, `hookTimeout: 120000` | Config uses `testTimeout: 180000`, `hookTimeout: 180000` | More generous timeouts | ✅ Reasonable — LLM responses can take 30+ sec; comment explains rationale |
+| 3 | Spec says `send(chatClient, contactId, text)` signature | `send(text)` uses module-level `aliceClient`/`kawaContactId` | Minor API surface difference | ✅ Functionally equivalent; simpler test API |
+| 4 | Task numbering skips 4.2 | No task 4.2 in task list | Missing task | ⚠️ Likely consolidated into 4.1 or 4.3 |
+| 5 | Proposal mentions "Not a framework — minimal helpers" | Helpers use module-level globals | Slightly different pattern but still minimal | ✅ Consistent with "no framework" spirit |
+
+---
+
+## Missing/Incomplete Items
+
+None found. All specified features are implemented in the codebase.
+
+---
+
+## Overall Verdict: ✅ **PASS**
+
+All 6 task groups are fully implemented. All spec scenarios are covered. The 5 discrepancies are minor (SDK method naming, timeout generosity, helper API style) and do not affect correctness. The shadow message queue has been fully removed, `/new` properly aborts before unsubscribing, the HTTP address API serves both GET and POST endpoints, and the e2e smoke test suite comprehensively exercises greeting, help, prompts, code execution, queued messages, and session lifecycle.
