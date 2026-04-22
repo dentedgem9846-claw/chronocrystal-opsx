@@ -2,7 +2,9 @@
 # Start Kawa and print its SimpleX connection address.
 # Usage: ./scripts/start.sh [--data-dir DIR] [--port PORT] [--address-port PORT]
 #
-# Press Ctrl+C to stop.
+# Kawa runs under nohup so it survives the parent shell exiting.
+# Logs go to /tmp/kawa.log. To stop: pkill -f 'node dist/kawa.js'
+# If running interactively (terminal), Ctrl+C will stop Kawa.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -35,16 +37,18 @@ if [[ ! -f dist/kawa.js ]]; then
   npm run build
 fi
 
-echo "Starting Kawa..."
+LOG_FILE="/tmp/kawa.log"
+echo "Starting Kawa (logs: $LOG_FILE)..."
 trap 'echo ""; echo "Stopping Kawa..."; pkill -f "node dist/kawa.js" 2>/dev/null || true; pkill -f "simplex-chat" 2>/dev/null || true' SIGINT SIGTERM
 
 if [[ ${#ENV_ARGS[@]} -gt 0 ]]; then
-  env "${ENV_ARGS[@]}" node dist/kawa.js &
+  nohup env "${ENV_ARGS[@]}" node dist/kawa.js >> "$LOG_FILE" 2>&1 &
 else
-  node dist/kawa.js &
+  nohup node dist/kawa.js >> "$LOG_FILE" 2>&1 &
 fi
 
 KAWA_PID=$!
+disown
 echo "Kawa PID: $KAWA_PID"
 
 # Wait for address
@@ -58,8 +62,12 @@ for i in $(seq 1 30); do
     echo "$ADDR"
     echo "========================================="
     echo ""
-    echo "Kawa is running (PID $KAWA_PID). Press Ctrl+C to stop."
-    wait $KAWA_PID
+    echo "Kawa is running (PID $KAWA_PID). Logs: $LOG_FILE"
+    echo "To stop: pkill -f 'node dist/kawa.js'"
+    # Keep script alive if interactive so Ctrl+C works
+    if [[ -t 0 ]]; then
+      wait $KAWA_PID
+    fi
     exit 0
   fi
   sleep 1
