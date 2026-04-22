@@ -2,8 +2,4 @@ flux/kawa/
 node_modules/
 *.html
 pi-session-*
-flux/kawa/
 .pi-settings.json
-*.html
-pi-session-*
-flux/kawa/
