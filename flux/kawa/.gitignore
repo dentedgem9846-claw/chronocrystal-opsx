@@ -4,4 +4,5 @@ dist/
 *.log
 results.json
 .pi/sessions/
-.pi/auth.json
+.pi/auth.jsonexamples/
+test/story.txt
