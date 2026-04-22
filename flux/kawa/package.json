@@ -8,15 +8,12 @@
     "build": "tsc",
     "start": "node dist/kawa.js",
     "dev": "tsc --watch",
-    "check": "biome check src/",
-    "check:all": "tsc --noEmit && biome check src/ tests/",
-    "format": "biome format --write src/",
+    "check": "tsc --noEmit && biome check --write src/ tests/ && tsc",
     "test": "vitest run --exclude tests/e2e",
     "smoke": "vitest run --config vitest.e2e.config.ts",
     "clean": "bash scripts/clean.sh",
-    "kawa:check": "bash scripts/check.sh",
-    "kawa:start": "bash scripts/start.sh",
-    "kawa:stop": "bash scripts/stop.sh"
+    "start:kawa": "bash scripts/start.sh",
+    "stop:kawa": "bash scripts/stop.sh"
   },
   "dependencies": {
     "@mariozechner/pi-coding-agent": "^0.68.0",

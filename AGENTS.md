@@ -7,27 +7,17 @@ Rules that catch real bugs before they ship. Every rule here exists because we s
 ### Scripts (`cd flux/kawa`)
 
 ```bash
-npm run build        # TypeScript compilation
-npm run check        # Biome lint+format for src/
-npm run check:all    # tsc + Biome for src/ and tests/
+npm run build        # TypeScript compilation to dist/
+npm run check        # tsc type check + biome autfix (lint+format) + tsc build
 npm run smoke        # e2e smoke tests
-npm run clean        # kill processes, remove temp dirs
-npm run kawa:start   # start kawa, print address
-npm run kawa:stop    # stop kawa
-```
-
-Or directly:
-
-```bash
-bash scripts/clean.sh    # kill all kawa/simplex processes + remove /tmp dirs
-bash scripts/check.sh    # tsc + biome + build
-bash scripts/start.sh    # start kawa, wait for address
-bash scripts/stop.sh     # stop kawa
+npm run clean        # kill kawa/simplex processes, remove /tmp dirs
+npm run start:kawa   # start kawa, wait for address
+npm run stop:kawa    # stop kawa
 ```
 
 ### Automatic skills
 
-- **`/kawa-check`** — Run after any file edit in `flux/kawa/`. Runs `scripts/check.sh` (tsc, biome, build). Fails the task if checks don't pass.
+- **`/kawa-check`** — Run after any file edit in `flux/kawa/`. Runs `npm run check` (tsc, biome autofix, build). Fails the task if checks don't pass.
 - **`/kawa-clean`** — Run when Kawa won't start, ports are stuck, or after smoke tests. Kills processes and removes `/tmp/kawa-*` dirs.
 
 ## 1. Run the checks after every change
@@ -35,13 +25,11 @@ bash scripts/stop.sh     # stop kawa
 Every subproject has a build and lint step. Run them before calling a task done.
 
 ```bash
-cd flux/<project>
-npm run build   # TypeScript compilation
-npm run check   # Biome lint + format (or whatever the project uses)
-npx biome check tests/ src/   # If tests/ aren't in the default check path
+cd flux/kawa
+npm run check   # tsc type check + biome autofix (lint+format) + tsc build
 ```
 
-If any fail, the change is not done.
+`npm run check` runs the full pipeline: type check, biome lint+format with autofix, then build. One command, everything fixed. If it fails, the change is not done.
 
 ## 2. Side-effect order matters — read the task carefully
 
