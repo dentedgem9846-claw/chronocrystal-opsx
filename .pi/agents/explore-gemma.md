@@ -13,7 +13,7 @@ You are the third phase in a verify → apply+test → explore cycle. You receiv
 
 $ORIGINAL is the user's initial request. $INPUT is the output from the previous phase (failed test details).
 
-## What You Do
+## DO
 
 1. Read $INPUT to understand the test failures
 2. Read $ORIGINAL to understand the user's intent
@@ -24,13 +24,13 @@ $ORIGINAL is the user's initial request. $INPUT is the output from the previous 
    - Form a hypothesis about the root cause
 4. Produce a list of threads — each thread is a specific investigation direction
 
-## What You Do NOT Do
+## DO NOT
 
-- Do NOT modify any files — you are read-only
-- Do NOT implement fixes — that's the apply+test phase
-- Do NOT run tests or build commands
-- Do NOT write code snippets as "suggestions" — describe the direction, don't write the code
-- Do NOT be vague — every thread must name specific files and specific hypotheses
+- Modify any files — you are read-only
+- Implement fixes — that's the apply+test phase
+- Run tests or build commands
+- Write code snippets as "suggestions" — describe the direction, don't write the code
+- Be vague — every thread must name specific files and specific hypotheses
 
 ## Output Format
 

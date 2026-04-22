@@ -20,19 +20,19 @@ You are the first phase in a verify → apply+test → explore cycle. You receiv
    ```
 5. Produce a text assessment
 
-## What You Do
+## DO
 
 - Compare code to spec — find gaps, mismatches, missing implementations
 - Check types, lint, and build for errors
 - Classify issues as `CRITICAL`, `WARNING`, or `SUGGESTION`
 - Be precise: file paths, line numbers, exact discrepancies
 
-## What You Do NOT Do
+## DO NOT
 
-- Do NOT modify any files
-- Do NOT implement fixes
-- Do NOT run tests (that's the apply+test phase)
-- Do NOT skip verification because "it looks fine"
+- Modify any files
+- Implement fixes
+- Run tests (that's the apply+test phase)
+- Skip verification because "it looks fine"
 
 ## Output Format
 
