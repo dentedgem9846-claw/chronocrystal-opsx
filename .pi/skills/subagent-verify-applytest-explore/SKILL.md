@@ -40,11 +40,11 @@ Three-phase subagent cycle. Loops until VERIFY passes clean. Explore only diagno
 
 ## Agent Definitions
 
-| Phase | Agent File | Model | Tools |
-|-------|-----------|-------|-------|
-| Verify | `.pi/agents/verify-glm.md` | glm-5.1:cloud | read,grep,find,ls,bash |
-| Apply & Test | `.pi/agents/applytest-kimi.md` | kimi-k2.6:cloud | read,write,edit,bash,grep,find,ls |
-| Explore | `.pi/agents/explore-gemma.md` | gemma4:31b-cloud | read,grep,find,ls |
+| Phase | Agent File | Model | Tools | Skills |
+|-------|-----------|-------|-------|--------|
+| Verify | `.pi/agents/verify-glm.md` | glm-5.1:cloud | read,grep,find,ls,bash | openspec-verify-change, kawa-check |
+| Apply & Test | `.pi/agents/applytest-kimi.md` | kimi-k2.6:cloud | read,write,edit,bash,grep,find,ls | openspec-apply-change, kawa-check, kawa-clean |
+| Explore | `.pi/agents/explore-gemma.md` | gemma4:31b-cloud | read,grep,find,ls | openspec-explore |
 
 Team: `verify-applytest-explore` in `.pi/agents/teams.yaml`
 
@@ -53,6 +53,11 @@ Team: `verify-applytest-explore` in `.pi/agents/teams.yaml`
 Each agent receives two things:
 - **$INPUT** — the text output from the previous phase
 - **$ORIGINAL** — the user's initial request, carried unchanged through all phases
+
+Each agent also receives its **skills** from the agent frontmatter — the cycle script extracts the `skills:` list and passes `--skill` flags to `pi`. The skills are the primary workflow knowledge:
+- **Verify**: `openspec-verify-change` guides systematic completeness/correctness/coherence checks; `kawa-check` runs types, lint, and build
+- **Apply & Test**: `openspec-apply-change` provides change context (specs, tasks, design); `kawa-check` for build/lint; `kawa-clean` for stuck processes
+- **Explore**: `openspec-explore` orients diagnosis around the change's actual requirements
 
 No JSON files. No structured handoff. Just text in, text out.
 
@@ -67,10 +72,16 @@ Transition signals are parsed from the last line of each agent's output:
 
 ## Phase 1: VERIFY
 
-**Agent**: `verify-glm` | **Model**: `glm-5.1:cloud` | **Tools**: read,grep,find,ls,bash
+**Agent**: `verify-glm` | **Model**: `glm-5.1:cloud` | **Tools**: read,grep,find,ls,bash | **Skills**: openspec-verify-change, kawa-check
 
 ```bash
-pi --agent verify-glm --no-session -p "Verify the change 'create-testing-session-with-boxlite'. Check specs and tasks against code. Run: cd flux/kawa && bash scripts/check.sh"
+pi --model glm-5.1:cloud --no-tools --tools read,grep,find,ls,bash \
+  --no-extensions --no-session \
+  --skill /path/to/.pi/skills/openspec-verify-change \
+  --skill /path/to/.pi/skills/kawa-check \
+  --append-system-prompt "$(cat .pi/agents/verify-glm.md)" \
+  -p "Verify the change '$CHANGE_NAME' using openspec-verify-change. Run kawa-check." \
+  --mode text
 ```
 
 Output ends with `ASSESSMENT: CLEAN` → **git commit, cycle done**.
@@ -78,10 +89,17 @@ Output ends with `ASSESSMENT: HAS_ISSUES` → **git commit, pipe output to apply
 
 ## Phase 2: APPLY & TEST
 
-**Agent**: `applytest-kimi` | **Model**: `kimi-k2.6:cloud` | **Tools**: read,write,edit,bash,grep,find,ls
+**Agent**: `applytest-kimi` | **Model**: `kimi-k2.6:cloud` | **Tools**: read,write,edit,bash,grep,find,ls | **Skills**: openspec-apply-change, kawa-check, kawa-clean
 
 ```bash
-echo "$VERIFY_OUTPUT" | pi --agent applytest-kimi --no-session -p "Fix these issues and run tests for 'create-testing-session-with-boxlite'. ORIGINAL: <user request>"
+pi --model kimi-k2.6:cloud --no-tools --tools read,write,edit,bash,grep,find,ls \
+  --no-extensions --no-session \
+  --skill /path/to/.pi/skills/openspec-apply-change \
+  --skill /path/to/.pi/skills/kawa-check \
+  --skill /path/to/.pi/skills/kawa-clean \
+  --append-system-prompt "$(cat .pi/agents/applytest-kimi.md)" \
+  -p "Fix these issues and run tests. Use openspec-apply-change for context. ORIGINAL: $ORIGINAL PREVIOUS: $INPUT" \
+  --mode text
 ```
 
 Output ends with `ASSESSMENT: ALL_PASSED` → **git commit, pipe output to verify**.
@@ -89,12 +107,17 @@ Output ends with `ASSESSMENT: HAS_FAILURES` → **git commit, pipe output to exp
 
 ## Phase 3: EXPLORE
 
-**Agent**: `explore-gemma` | **Model**: `gemma4:31b-cloud` | **Tools**: read,grep,find,ls
+**Agent**: `explore-gemma` | **Model**: `gemma4:31b-cloud` | **Tools**: read,grep,find,ls | **Skills**: openspec-explore
 
 **This phase does NOT modify files.** It reads code and produces THREADs for Kimi.
 
 ```bash
-echo "$APPLYTEST_OUTPUT" | pi --agent explore-gemma --no-session -p "Diagnose these failures for 'create-testing-session-with-boxlite'. ORIGINAL: <user request>"
+pi --model gemma4:31b-cloud --no-tools --tools read,grep,find,ls \
+  --no-extensions --no-session \
+  --skill /path/to/.pi/skills/openspec-explore \
+  --append-system-prompt "$(cat .pi/agents/explore-gemma.md)" \
+  -p "Diagnose failures. Use openspec-explore for change context. ORIGINAL: $ORIGINAL PREVIOUS: $INPUT" \
+  --mode text
 ```
 
 Output ends with `NEXT: applytest` → **git commit, pipe threads to apply+test**.

@@ -23,22 +23,53 @@ commit() {
 }
 
 # Helper: run pi agent
+# Skills are defined in the agent frontmatter;
+# --skill flags are built from the agent's skills: field.
 run_agent() {
   local agent_file="$1"
   local model="$2"
   local tools="$3"
   local prompt="$4"
 
-  local agent_content
-  agent_content=$(cat "$PROJECT_DIR/.pi/agents/$agent_file.md")
+  local agent_path="$PROJECT_DIR/.pi/agents/$agent_file.md"
+
+  # Extract skills from agent frontmatter (yaml between --- markers)
+  local skill_flags=""
+  local in_frontmatter=false
+  local in_skills=false
+  while IFS= read -r line; do
+    if [[ "$line" == "---" ]]; then
+      if $in_frontmatter; then
+        break
+      else
+        in_frontmatter=true
+        continue
+      fi
+    fi
+    if $in_frontmatter; then
+      if [[ "$line" =~ ^skills: ]]; then
+        in_skills=true
+        continue
+      fi
+      if $in_skills; then
+        if [[ "$line" =~ ^[[:space:]]+-[[:space:]]+(.*) ]]; then
+          local skill_name="${BASH_REMATCH[1]}"
+          # pi --skill takes a path to skill directory (containing SKILL.md) or file
+          skill_flags="$skill_flags --skill $PROJECT_DIR/.pi/skills/$skill_name"
+        elif [[ ! "$line" =~ ^[[:space:]] ]]; then
+          in_skills=false
+        fi
+      fi
+    fi
+  done < "$agent_path"
 
   pi \
     --model "$model" \
     --no-tools --tools "$tools" \
-    --no-skills \
     --no-extensions \
     --no-session \
-    --append-system-prompt "$agent_content" \
+    $skill_flags \
+    --append-system-prompt "$(cat "$agent_path")" \
     -p "$prompt" \
     --mode text
 }
@@ -65,7 +96,7 @@ while [ "$ITERATION" -le "$MAX_ITERATIONS" ]; do
   case "$STATE" in
     verify)
       echo "Phase: VERIFY (GLM 5.1)"
-      OUTPUT=$(run_agent "verify-glm" "ollama/glm-5.1:cloud" "read,grep,find,ls,bash" "Verify the change '$CHANGE_NAME'. Check the specs and tasks against actual code in $KAWA_DIR. ORIGINAL: $ORIGINAL" 2>&1)
+      OUTPUT=$(run_agent "verify-glm" "ollama/glm-5.1:cloud" "read,grep,find,ls,bash" "Verify the change '$CHANGE_NAME' using the openspec-verify-change skill. Check specs, tasks, and design against actual code. Run kawa-check (check.sh). ORIGINAL: $ORIGINAL" 2>&1)
       echo "$OUTPUT"
       echo "$OUTPUT" > "$CYCLE_DIR/${ITERATION}-verify.txt"
 
@@ -92,7 +123,7 @@ while [ "$ITERATION" -le "$MAX_ITERATIONS" ]; do
         PREV=$(cat "$CYCLE_DIR/$((ITERATION-1))-explore.txt" 2>/dev/null || echo "No previous output found")
       fi
 
-      OUTPUT=$(run_agent "applytest-kimi" "ollama/kimi-k2.6:cloud" "read,write,edit,bash,grep,find,ls" "Fix the issues listed below and run the smoke tests. ORIGINAL: $ORIGINAL PREVIOUS PHASE OUTPUT: $PREV" 2>&1)
+      OUTPUT=$(run_agent "applytest-kimi" "ollama/kimi-k2.6:cloud" "read,write,edit,bash,grep,find,ls" "Fix the issues listed below and run the smoke tests. Use openspec-apply-change to get change context first. ORIGINAL: $ORIGINAL PREVIOUS PHASE OUTPUT: $PREV" 2>&1)
       echo "$OUTPUT"
       echo "$OUTPUT" > "$CYCLE_DIR/${ITERATION}-applytest.txt"
 
@@ -116,7 +147,7 @@ while [ "$ITERATION" -le "$MAX_ITERATIONS" ]; do
         PREV=$(cat "$CYCLE_DIR/${ITERATION}-applytest.txt" 2>/dev/null || echo "No previous output found")
       fi
 
-      OUTPUT=$(run_agent "explore-gemma" "ollama/gemma4:31b-cloud" "read,grep,find,ls" "Diagnose the test failures listed below. Suggest threads for Kimi to fix. Do NOT modify any files. ORIGINAL: $ORIGINAL PREVIOUS PHASE OUTPUT: $PREV" 2>&1)
+      OUTPUT=$(run_agent "explore-gemma" "ollama/gemma4:31b-cloud" "read,grep,find,ls" "Diagnose the test failures listed below. Use the openspec-explore skill to get oriented on the change. Suggest threads for Kimi to fix. Do NOT modify any files. ORIGINAL: $ORIGINAL PREVIOUS PHASE OUTPUT: $PREV" 2>&1)
       echo "$OUTPUT"
       echo "$OUTPUT" > "$CYCLE_DIR/${ITERATION}-explore.txt"
 

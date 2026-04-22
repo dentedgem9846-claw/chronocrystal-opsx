@@ -15,28 +15,37 @@ agents:
 
 states:
   verify:
-    description: "Audit specs, tasks, and code. Run check.sh."
+    description: "Audit specs, tasks, and code. Uses openspec-verify-change and kawa-check skills."
     agent: verify-glm
     model: glm-5.1:cloud
     tools: read,grep,find,ls,bash
+    skills:
+      - openspec-verify-change
+      - kawa-check
     transitions:
       CLEAN: COMPLETE
       HAS_ISSUES: applytest
 
   applytest:
-    description: "Apply fixes from verify or explore threads. Build and run smoke suite."
+    description: "Apply fixes from verify or explore threads. Uses openspec-apply-change, kawa-check, and kawa-clean skills."
     agent: applytest-kimi
     model: kimi-k2.6:cloud
     tools: read,write,edit,bash,grep,find,ls
+    skills:
+      - openspec-apply-change
+      - kawa-check
+      - kawa-clean
     transitions:
       ALL_PASSED: verify
       HAS_FAILURES: explore
 
   explore:
-    description: "Investigate failures, suggest threads. Read-only — no code edits."
+    description: "Investigate failures, suggest threads. Uses openspec-explore skill. Read-only — no code edits."
     agent: explore-gemma
     model: gemma4:31b-cloud
     tools: read,grep,find,ls
+    skills:
+      - openspec-explore
     transitions:
       default: applytest
 
