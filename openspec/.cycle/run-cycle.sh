@@ -97,6 +97,7 @@ MAX_ITERATIONS=5
 STATE="verify"
 PREV_VERIFY=""
 PREV_TRIAGE=""
+NEEDS_FULL_REVERIFY=false
 
 while [ "$ITERATION" -le "$MAX_ITERATIONS" ]; do
   echo "=== Iteration $ITERATION — State: $STATE ==="
@@ -105,8 +106,13 @@ while [ "$ITERATION" -le "$MAX_ITERATIONS" ]; do
     verify)
       echo "Phase: VERIFY (GLM 5.1)"
       # Build focused prompt: if re-verifying, tell the agent what to re-check
-      if [ -n "$PREV_VERIFY" ]; then
+      IS_FOCUSED_VERIFY=false
+      if [ "$NEEDS_FULL_REVERIFY" = true ]; then
+        VERIFY_PROMPT="FULL RE-VERIFICATION of change '$CHANGE_NAME' using the openspec-verify-change skill. A focused re-verify reported CLEAN — now do a complete scan to catch any issues introduced by fixes. Check specs, tasks, and design against actual code. Run kawa-check (npm run check). ORIGINAL: $ORIGINAL"
+        NEEDS_FULL_REVERIFY=false
+      elif [ -n "$PREV_VERIFY" ]; then
         VERIFY_PROMPT="Re-verify the change '$CHANGE_NAME' using the openspec-verify-change skill. Focus on confirming whether the issues from the previous verification have been addressed (by fixes or by filing in issues.md). Run kawa-check (npm run check). PREVIOUS ISSUES: $PREV_VERIFY ORIGINAL: $ORIGINAL"
+        IS_FOCUSED_VERIFY=true
       else
         VERIFY_PROMPT="Verify the change '$CHANGE_NAME' using the openspec-verify-change skill. Check specs, tasks, and design against actual code. Run kawa-check (npm run check). ORIGINAL: $ORIGINAL"
       fi
@@ -117,10 +123,20 @@ while [ "$ITERATION" -le "$MAX_ITERATIONS" ]; do
       PREV_VERIFY=$(echo "$OUTPUT" | grep -E '^(CRITICAL|WARNING|W[0-9]+)' | head -20)
 
       if echo "$OUTPUT" | grep -q "ASSESSMENT: CLEAN"; then
-        echo "VERIFY CLEAN — cycle complete!"
-        commit "verify" "$ITERATION"
-        STATE="COMPLETE"
-        break
+        if [ "$IS_FOCUSED_VERIFY" = true ]; then
+          # Focused re-verify came back clean — schedule one final full scan
+          echo "VERIFY CLEAN (focused) — scheduling final full re-verification"
+          NEEDS_FULL_REVERIFY=true
+          commit "verify" "$ITERATION"
+          ITERATION=$((ITERATION + 1))
+          STATE="verify"
+        else
+          # Full scan (first or final) came back clean — done
+          echo "VERIFY CLEAN (full scan) — cycle complete!"
+          commit "verify" "$ITERATION"
+          STATE="COMPLETE"
+          break
+        fi
       else
         echo "VERIFY HAS_ISSUES — proceeding to triage"
         commit "verify" "$ITERATION"
