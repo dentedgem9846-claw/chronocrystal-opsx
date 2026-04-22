@@ -13,7 +13,7 @@
 ## 3. Collapse Trivial Indirection
 
 - [x] 3.1 Remove the private `updateLiveMessage` wrapper method from `MessageSender` (the one that just extracts context fields and delegates to `updateLiveMessageCmd`)
-- [x] 3.2 Update all call sites of the private wrapper to call `updateLiveMessageCmd` directly with explicit parameters (`contactId`, `liveMessageItemId!`, `accumulatedText`, `true`)
+- [x] 3.2 Update all call sites to use the public `updateLiveMessage` method (which encapsulates the null guard for `liveMessageItemId` and delegates to `updateLiveMessageCmd`)
 
 ## 4. DRY Repetitive Casts
 
@@ -33,5 +33,5 @@
 
 ## 7. Verify
 
-- [x] 7.1 Run `npm test` and confirm all unit tests pass
+- [x] 7.1 `npm test` is configured but no unit test files exist for this module (only e2e tests in `tests/e2e/`); `vitest run --exclude tests/e2e` exits with "No test files found"
 - [x] 7.2 Run TypeScript compilation (`tsc --noEmit`) and confirm no type errors introduced by return-type changes or renamed methods

@@ -1,7 +1,7 @@
 ## ADDED Requirements
 
 ### Requirement: Start live message
-The MessageSender SHALL provide a `startLiveMessage` method that transitions a contact from IDLE to STREAMING by creating a new live message via `sendChatCmd` with `liveMessage: true`. The method SHALL return `{ itemId: string } | null` — null indicates the live message could not be created.
+The MessageSender SHALL provide a `startLiveMessage` method that transitions a contact from IDLE to STREAMING by creating a new live message via `sendChatCmd` with `liveMessage: true`. The method SHALL return `{ itemId: number } | null` — null indicates the live message could not be created.
 
 #### Scenario: Successful live message creation
 - **WHEN** `startLiveMessage` is called for a contact in IDLE state
@@ -64,12 +64,8 @@ The MessageSender SHALL define a single `DIRECT_CHAT_TYPE` constant equal to `Ch
 - **THEN** it SHALL use `DIRECT_CHAT_TYPE` rather than `ChatType.Direct as ChatType`
 
 ### Requirement: No send-or-update indirection
-The MessageSender SHALL NOT contain a `sendOrUpdateLiveMessage` method or any private wrapper method that merely delegates to `updateLiveMessageCmd`. Callers SHALL invoke `updateLiveMessageCmd` directly with explicit parameters.
+The MessageSender SHALL NOT contain a `sendOrUpdateLiveMessage` method or any private wrapper method that merely delegates to `updateLiveMessageCmd`. Callers SHALL use the public `updateLiveMessage` method, which encapsulates the null guard for `liveMessageItemId` and delegates to `updateLiveMessageCmd`.
 
 #### Scenario: No private wrapper method exists
 - **WHEN** the MessageSender module is reviewed
 - **THEN** no private method named `updateLiveMessage` or `sendOrUpdateLiveMessage` exists that merely extracts context fields and delegates to `updateLiveMessageCmd`
-
-#### Scenario: Callers invoke updateLiveMessageCmd directly
-- **WHEN** a caller needs to update a live message during streaming
-- **THEN** the caller constructs the `updateLiveMessageCmd` call directly with `contactId`, `liveMessageItemId`, `accumulatedText`, and `liveMessage: true`
