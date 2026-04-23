@@ -161,9 +161,9 @@ export async function setupShared(): Promise<void> {
 	cleanup(ALICE_SIMPLEX_DIR);
 
 	// 2. Start Kawa — black box: env vars only, no wrapper script
-	// KAWA_E2E_THROTTLE_MS controls the throttle interval (default 50ms).
+	// KAWA_LIVE_MSG_UPDATE_INTERVAL_MS controls the throttle interval (default 50ms in e2e).
 	// Set to 0 for unthrottled comparison runs.
-	const throttleMs = process.env.KAWA_E2E_THROTTLE_MS ?? "50";
+	const throttleMs = process.env.KAWA_LIVE_MSG_UPDATE_INTERVAL_MS ?? "50";
 	console.log(`[e2e] Throttle interval: ${throttleMs}ms`);
 	const cwd = new URL("../..", import.meta.url).pathname;
 	kawaProc = spawn("node", ["dist/kawa.js"], {
