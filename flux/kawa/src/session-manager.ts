@@ -1,4 +1,5 @@
 import type { AgentSession, AgentSessionEvent } from "@mariozechner/pi-coding-agent";
+import type { LiveMessageThrottler } from "./live-message-throttler.js";
 
 /**
  * Live message streaming state.
@@ -23,6 +24,8 @@ export interface ContactContext {
 	generation: number;
 	/** Throttle timer for batching live message updates (set by LiveMessageThrottler) */
 	throttleTimer: ReturnType<typeof setTimeout> | null;
+	/** Text of the last successfully sent live message update (for no-op flush detection) */
+	lastSentText: string;
 }
 
 /**
@@ -30,8 +33,13 @@ export interface ContactContext {
  */
 export class SessionManager {
 	private byContactId = new Map<number, ContactContext>();
+	private throttler: LiveMessageThrottler | null = null;
 
 	constructor(private maxSessions: number) {}
+
+	setThrottler(throttler: LiveMessageThrottler): void {
+		this.throttler = throttler;
+	}
 
 	/**
 	 * Add a contact context. Returns false if max sessions exceeded.
@@ -57,10 +65,7 @@ export class SessionManager {
 	removeByContactId(contactId: number): ContactContext | undefined {
 		const ctx = this.byContactId.get(contactId);
 		if (ctx) {
-			if (ctx.throttleTimer !== null) {
-				clearTimeout(ctx.throttleTimer);
-				ctx.throttleTimer = null;
-			}
+			this.throttler?.cancel(ctx);
 			this.byContactId.delete(contactId);
 			ctx.unsubscribe?.();
 		}

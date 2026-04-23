@@ -32,10 +32,17 @@ export class LiveMessageThrottler {
 
 		ctx.throttleTimer = setTimeout(() => {
 			ctx.throttleTimer = null;
-			// Send the update with the latest accumulatedText
-			this.sender.updateLiveMessage(ctx, ctx.accumulatedText).catch((err) => {
-				console.error(`[throttler] Error in throttled update for contact ${ctx.contactId}:`, err);
-			});
+			// Skip if text hasn't changed since last send
+			if (ctx.accumulatedText === ctx.lastSentText) return;
+			const textToSend = ctx.accumulatedText;
+			this.sender
+				.updateLiveMessage(ctx, textToSend)
+				.then(() => {
+					ctx.lastSentText = textToSend;
+				})
+				.catch((err) => {
+					console.error(`[throttler] Error in throttled update for contact ${ctx.contactId}:`, err);
+				});
 		}, this.intervalMs);
 	}
 
@@ -49,6 +56,8 @@ export class LiveMessageThrottler {
 	 * counter has changed after the async update, the result is discarded.
 	 */
 	async flush(ctx: ContactContext): Promise<void> {
+		const hadTimer = ctx.throttleTimer !== null;
+
 		// Cancel any pending timer
 		if (ctx.throttleTimer !== null) {
 			clearTimeout(ctx.throttleTimer);
@@ -57,11 +66,17 @@ export class LiveMessageThrottler {
 
 		// Only send if there's something to flush
 		if (ctx.liveMessageState === "STREAMING" && ctx.liveMessageItemId !== null) {
+			// No-op if no timer was pending and text hasn't changed since last send
+			if (!hadTimer && ctx.accumulatedText === ctx.lastSentText) {
+				return;
+			}
 			// Capture generation before await for staleness detection
 			const gen = ctx.generation;
-			await this.sender.updateLiveMessage(ctx, ctx.accumulatedText);
+			const textToSend = ctx.accumulatedText;
+			await this.sender.updateLiveMessage(ctx, textToSend);
 			// Discard if generation changed during await (stale event)
 			if (ctx.generation !== gen) return;
+			ctx.lastSentText = textToSend;
 		}
 	}
 

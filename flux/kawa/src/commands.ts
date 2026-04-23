@@ -1,4 +1,5 @@
 import type { KawaConfig } from "./config.js";
+import type { LiveMessageThrottler } from "./live-message-throttler.js";
 import type { MessageSender } from "./message-sender.js";
 import type { ContactContext, SessionManager } from "./session-manager.js";
 
@@ -12,6 +13,7 @@ export class CommandHandler {
 		private messageSender: MessageSender,
 		private config: KawaConfig,
 		private createSession: (contactId: number) => Promise<ContactContext | undefined>,
+		private throttler: LiveMessageThrottler,
 	) {}
 
 	/**
@@ -59,11 +61,8 @@ export class CommandHandler {
 	private async handleNew(contactId: number): Promise<void> {
 		const oldCtx = this.sessionManager.getByContactId(contactId);
 		if (oldCtx) {
-			// Cancel any pending throttle timer
-			if (oldCtx.throttleTimer !== null) {
-				clearTimeout(oldCtx.throttleTimer);
-				oldCtx.throttleTimer = null;
-			}
+			// Cancel any pending throttle timer via throttler API
+			this.throttler.cancel(oldCtx);
 
 			// Increment generation to invalidate any in-flight agent events
 			oldCtx.generation++;

@@ -132,6 +132,7 @@ async function createSessionForContact(
 			unsubscribe: null,
 			generation: 0,
 			throttleTimer: null,
+			lastSentText: "",
 		};
 
 		const added = sessions.add(ctx);
@@ -199,6 +200,7 @@ async function handleAgentEvent(
 					if (ctx.generation !== gen) return; // stale event, discard silently
 					if (result) {
 						ctx.liveMessageItemId = result.itemId;
+						ctx.lastSentText = ctx.accumulatedText;
 					}
 				} else {
 					// STREAMING: throttle the update
@@ -218,6 +220,7 @@ async function handleAgentEvent(
 				ctx.accumulatedText += append;
 				await sender.updateLiveMessage(ctx, ctx.accumulatedText);
 				if (ctx.generation !== gen) return; // stale event, discard silently
+				ctx.lastSentText = ctx.accumulatedText;
 			}
 			break;
 		}
@@ -232,6 +235,7 @@ async function handleAgentEvent(
 				ctx.accumulatedText += append;
 				await sender.updateLiveMessage(ctx, ctx.accumulatedText);
 				if (ctx.generation !== gen) return; // stale event, discard silently
+				ctx.lastSentText = ctx.accumulatedText;
 			}
 			break;
 		}
@@ -333,8 +337,14 @@ async function main() {
 				activeChatClient = connectedClient;
 				const sender = new MessageSender(connectedClient, config);
 				const throttler = new LiveMessageThrottler(sender, config.liveMessageUpdateIntervalMs);
-				const cmdHandler = new CommandHandler(sessions, sender, config, (contactId) =>
-					createAndWireSessionForHandler(contactId, sessions, sender, formatter, throttler),
+				sessions.setThrottler(throttler);
+				const cmdHandler = new CommandHandler(
+					sessions,
+					sender,
+					config,
+					(contactId) =>
+						createAndWireSessionForHandler(contactId, sessions, sender, formatter, throttler),
+					throttler,
 				);
 				simplexProcess.resetBackoff();
 
@@ -561,10 +571,8 @@ async function handleIncomingMessage(
 			ctx.liveMessageState = "IDLE";
 			ctx.accumulatedText = "";
 			ctx.liveMessageItemId = null;
-			if (ctx.throttleTimer !== null) {
-				clearTimeout(ctx.throttleTimer);
-				ctx.throttleTimer = null;
-			}
+			ctx.lastSentText = "";
+			throttler.cancel(ctx);
 			await ctx.session.prompt(text);
 		}
 	} catch (err) {
