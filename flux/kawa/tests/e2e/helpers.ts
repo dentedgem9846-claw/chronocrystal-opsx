@@ -1,5 +1,5 @@
 import { ChatType } from "@simplex-chat/types/dist/types.js";
-import { aliceClient, aliceHistory, kawaContactId } from "./setup.js";
+import { aliceClient, aliceHistory, kawaContactId, updateCounts } from "./setup.js";
 
 export async function send(text: string): Promise<void> {
 	// @ts-ignore — ChatClient types mismatch between CJS/ESM
@@ -26,8 +26,9 @@ export async function waitForMessage(
 export async function resetSession(): Promise<void> {
 	await send("/new");
 	await waitForMessage((t) => t.includes("New session") || t.includes("fresh"), 30000);
-	// Drain any stale history
+	// Drain any stale history and update counts
 	for (let i = aliceHistory.length - 1; i >= 0; i--) {
 		if (aliceHistory[i].contactId === kawaContactId) aliceHistory.splice(i, 1);
 	}
+	updateCounts.clear();
 }

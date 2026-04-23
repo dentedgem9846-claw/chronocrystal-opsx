@@ -20,6 +20,9 @@ export let kawaContactId: number;
 /** History of messages received by Alice from Kawa */
 export const aliceHistory: Array<{ contactId: number; text: string; ts: number; itemId?: number }> =
 	[];
+
+/** Tracks chatItemUpdated event counts per itemId — proxy for updateLiveMessage command count */
+export const updateCounts: Map<number, number> = new Map();
 let historyStarted = false;
 
 function cleanup(dir: string) {
@@ -116,6 +119,10 @@ function startHistoryCollector(client: ChatClient) {
 				if (content?.type !== "rcvMsgContent" || !content.msgContent) continue;
 				if (content.msgContent.type !== "text" || !content.msgContent.text) continue;
 				const itemId = item.chatItem.meta.itemId;
+
+				// Track update count per message (proxy for updateLiveMessage commands)
+				updateCounts.set(itemId, (updateCounts.get(itemId) ?? 0) + 1);
+
 				const idx = aliceHistory.findIndex(
 					(m) => m.contactId === chatInfo.contact.contactId && m.itemId === itemId,
 				);
@@ -147,6 +154,7 @@ export async function setupShared(): Promise<void> {
 	checkPrerequisites();
 
 	aliceHistory.length = 0;
+	updateCounts.clear();
 
 	// 1. Clean dirs
 	cleanup(KAWA_SIMPLEX_DIR);
