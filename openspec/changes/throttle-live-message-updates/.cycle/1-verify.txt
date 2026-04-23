@@ -1,83 +1,23 @@
-Here is my complete verification of the `throttle-live-message-updates` change:
+Everything passes. Let me now compile the full verification report.
 
-## Verification Results
+## Verification Report: throttle-live-message-updates
 
-### `kawa-check`: PASSED
-- `tsc --noEmit` ✅
-- `biome check` ✅ 
-- Unit tests (34/34) ✅
+### Summary
 
-### Specs vs Code Alignment
+| Dimension    | Status |
+|--------------|--------|
+| Completeness | 40/40 tasks complete, 6/6 spec files covered |
+| Correctness  | Most requirements implemented correctly, 2 divergences |
+| Coherence    | Follows design decisions, minor deviations |
 
-**live-message-throttle spec** — mostly aligned:
+### Issues
 
-| Spec Requirement | Status |
-|---|---|
-| Throttled message_update (scheduleUpdate) | ✅ `LiveMessageThrottler.scheduleUpdate()` |
-| First token immediate (no throttle on start) | ✅ `startLiveMessage` called directly |
-| Tool markers flush immediately | ✅ `throttler.flush()` before tool append |
-| Agent end flushes immediately | ✅ `throttler.flush()` before `finalizeLiveMessage()` |
-| Configurable interval via env var (default 200ms) | ✅ `KAWA_LIVE_MSG_UPDATE_INTERVAL_MS` |
-| Timer cleanup on /new and contact removal | ✅ Both paths clear `throttleTimer` |
-| `throttleTimer` on ContactContext, initialized null | ✅ |
-| No throttle on start/finalize | ✅ |
-| Generation staleness detection in flush | ✅ |
-| Flush cancels timer and sends immediately | ⚠️ See issue below |
+WARNING: flux/kawa/src/live-message-throttler.ts:60 — `flush()` sends an `updateLiveMessage` call even when no throttle timer is pending and no text has changed since the last send. Spec scenario "Flush with no pending timer" says: "the method SHALL be a no-op (no update sent if no buffered text has changed since last send)". In practice this causes a redundant idempotent update call when `flush()` is called before tool markers or agent_end with no pending throttled update — harmless but technically non-compliant with spec.
 
-**markdown-to-simplex spec** — one violation:
+WARNING: flux/kawa/src/markdown-to-simplex.ts:61 — `*text*` (single asterisk) is always converted to `_text_` (italic), even when it represents SimpleX-native bold. Spec requirement "Preserving SimpleX-native formatting" says: "WHEN extractMessageText receives text containing `*correct bold*`, THEN the output SHALL contain `*correct bold*` unchanged". The regex approach cannot distinguish SimpleX-native `*bold*` from standard `*italic*`. This creates a conflict with the `.pi/SYSTEM.md` which tells the LLM to use `*bold*` for bold — if the LLM follows SYSTEM.md, the converter will incorrectly turn it into `_italic_`. The unit test documents this known limitation. To resolve: either update the spec to reflect this tradeoff, or add tracking state to detect whether `*text*` was produced by the LLM vs converted from `**text**`.
 
-| Spec Requirement | Status |
-|---|---|
-| `**bold**` → `*bold*` | ✅ |
-| `*italic*` → `_italic_` | ✅ |
-| `__bold__` → `_italic_` | ✅ |
-| `~~strike~~` → `~strike~` | ✅ |
-| Code blocks/inline code preserved | ✅ |
-| Links preserved | ✅ |
-| `# heading` → plain text | ✅ |
-| `***bold italic***` → `_*bold italic*_` | ✅ |
-| Already-correct SimpleX bold `*text*` unchanged | ❌ |
-| Already-correct SimpleX italic `_text_` unchanged | ✅ |
-| Already-correct SimpleX strike `~text~` unchanged | ✅ |
-| Conversion only in extractMessageText, not formatEventAppend | ✅ |
+WARNING: flux/kawa/src/live-message-throttler.ts:73-76 — `LiveMessageThrottler.cancel()` method exists but is never called. Timer cleanup is done inline in `session-manager.ts:60-62`, `kawa.ts:564-566`, and `commands.ts:63-65`. Task 1.10 says "call throttler's `cancel()`" and task 1.11 implies the same. The behavior is functionally equivalent, but the uncalled `cancel()` method is dead code.
 
-**kawa-message-sender spec (modified)** — one typo:
-
-| Spec Requirement | Status |
-|---|---|
-| Throttled update path through throttler | ✅ |
-| `sender.updateMessage` reference in spec | ⚠️ Minor spec typo (should be `updateLiveMessage`) |
-
-### Design vs Code Alignment
-
-| Decision | Status |
-|---|---|
-| D1: Separate `LiveMessageThrottler` class | ✅ |
-| D2: Timer-based coalescing with flush hooks | ✅ |
-| D3: Throttle state on `ContactContext` | ✅ |
-| D4: Flush before tool markers | ✅ |
-| D5: Markdown conversion in `EventFormatter.extractMessageText` | ✅ |
-| D6: Regex-based conversion (no AST dependency) | ✅ |
-| D7: `.pi/SYSTEM.md` for SimpleX dialect | ✅ |
-
-### Tasks Verification
-
-All tasks checked as complete (1.1–5.8). Implementation files exist and are wired correctly.
-
----
-
-### Issues Found
-
-WARNING: flux/kawa/src/markdown-to-simplex.ts:42 — SimpleX bold `*text*` is converted to `_text_` (italic) instead of being preserved unchanged. Spec requires: "WHEN extractMessageText receives text containing `*correct bold*`, THEN the output SHALL contain `*correct bold*` unchanged". This creates a conflict with the SYSTEM.md prompt (which tells the LLM to use `*bold*` for SimpleX bold) — the converter then breaks that output by making it italic. The `**bold**` → `*bold*` path works correctly, so standard markdown bold functions properly, but the two defense layers (system prompt + converter) work against each other when the LLM follows the system prompt.
-
-WARNING: flux/kawa/tests/markdown-to-simplex.test.ts:107 — Test "preserves already-correct SimpleX bold *text*" has no assertions (empty body with only an explanatory comment). This masks the spec violation above. The test passes vacuously instead of asserting the required behavior, which would fail: `convertMarkdownToSimplex("*bold*")` → `"_bold_"` rather than the spec-required `"*bold*"`.
-
-WARNING: flux/kawa/src/live-message-throttler.ts:37 — `flush()` sends a `sender.updateLiveMessage()` call even when no throttle timer is pending, violating the spec: "Flush with no pending timer — the method SHALL be a no-op (no update sent if no buffered text has changed since last send)". When called from tool_execution handlers with no pending timer, this produces one redundant SimpleX command. Not harmful to UX (same text content), but a spec violation that could be fixed by tracking whether text has changed since the last send.
-
-SUGGESTION: flux/kawa/src/kawa.ts:564-566 — `handleIncomingMessage` manually clears `ctx.throttleTimer` instead of calling `throttler.cancel(ctx)`, even though the throttler instance is available as a parameter. This duplicates the cancel logic and would miss any future additions to `cancel()` (e.g., logging, metrics).
-
-SUGGESTION: flux/kawa/src/session-manager.ts:87-92 — `SessionManager.closeAll()` unsubscribes sessions but does not cancel throttle timers, unlike `removeByContactId()` which does. While harmless at process shutdown (timers are GC'd on exit), an orderly shutdown calling `closeAll()` alone could leave dangling timers if the process doesn't immediately exit.
-
-SUGGESTION: openspec/changes/throttle-live-message-updates/specs/kawa-message-sender/spec.md — Spec references `sender.updateMessage()` but the code uses `sender.updateLiveMessage()`. Minor spec typo.
+SUGGESTION: flux/kawa/src/live-message-throttler.ts:34-38 — The `scheduleUpdate` timer callback does not include generation-based staleness detection. The design doc's "Risks/Trade-offs" section mentions "Timer callback checks `ctx.throttleTimer === null` to detect cancellation and skips the update" as a mitigation, but the implementation doesn't perform this check — it relies on `clearTimeout` being called before the generation changes. This is functionally correct (JavaScript's single-threaded event loop prevents the race), but diverges from the stated design. Consider adding `const gen = ctx.generation` before the `updateLiveMessage` call and checking after, for symmetry with `flush()`.
 
 ASSESSMENT: HAS_ISSUES

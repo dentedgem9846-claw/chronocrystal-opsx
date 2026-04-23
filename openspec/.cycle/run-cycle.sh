@@ -29,52 +29,51 @@ commit() {
   git commit -m "opsx: $phase $iteration for $CHANGE_NAME" --allow-empty 2>/dev/null || true
 }
 
-# Helper: detect assessment from agent output
-# Checks for exact markers first, then falls back to fuzzy detection
+# Helper: detect the assessment from agent output.
+# Priority: exact ASSESSMENT markers > no marker found (defaults to HAS_ISSUES for verify).
+# Returns one of: CLEAN, HAS_ISSUES, HAS_CODE_FIXES, DOCS_ONLY, ALL_PASSED, HAS_FAILURES, UNKNOWN
 detect_assessment() {
   local output="$1"
-  local marker="$2"
-  # Exact match (case-sensitive)
-  if echo "$output" | grep -q "$marker"; then
+
+  # 1. Check for ANY explicit ASSESSMENT: <MARKER> line — these always win
+  local marker
+  marker=$(echo "$output" | grep -oE 'ASSESSMENT: *[A-Z_]+' | head -1 | sed 's/ASSESSMENT: *//' || true)
+  if [ -n "$marker" ]; then
+    echo "$marker"
     return 0
   fi
-  # Case-insensitive match
-  if echo "$output" | grep -qi "$(echo "$marker" | sed 's/:/:/')"; then
+
+  # 2. No explicit marker — use fuzzy detection based on content
+  #    "no issues" phrases tend to co-occur with "2 warnings found" etc.
+  #    so we only use fuzzy when NO assessment line exists at all.
+
+  # Check for issue indicators — if any found, NOT clean
+  if echo "$output" | grep -qiE '(CRITICAL|WARNING)[: ]'; then
+    echo "HAS_ISSUES"
     return 0
   fi
-  # Fuzzy: look for the assessment word near "assessment" or "final assessment"
-  local keyword
-  keyword=$(echo "$marker" | sed 's/ASSESSMENT: //')
-  case "$keyword" in
-    CLEAN)
-      # Look for phrases indicating clean/no issues
-      if echo "$output" | grep -qiE "(no (critical|issue|problem)|all (task|check|test).*(complete|pass|green)|cycle complete|ready for archive|verification complete)"; then
-        return 0
-      fi
-      ;;
-    HAS_ISSUES|HAS_CODE_FIXES)
-      # Look for phrases indicating issues found
-      if echo "$output" | grep -qiE "(critical|warning|issue found|bug|missing|inconsisten|divergen|fail)"; then
-        return 0
-      fi
-      ;;
-    DOCS_ONLY)
-      if echo "$output" | grep -qiE "(doc(umentation)? only|spec (typo|fix|update)|no code)"; then
-        return 0
-      fi
-      ;;
-    ALL_PASSED)
-      if echo "$output" | grep -qiE "(all (test|check|smoke).*(pass|green|success)|0 (fail|error))"; then
-        return 0
-      fi
-      ;;
-    HAS_FAILURES)
-      if echo "$output" | grep -qiE "(test.*(fail|error|broken)|smoke.*(fail|error))"; then
-        return 0
-      fi
-      ;;
-  esac
-  return 1
+
+  # Check for failure indicators
+  if echo "$output" | grep -qiE '(test.*(fail|error|broken)|smoke.*fail)'; then
+    echo "HAS_FAILURES"
+    return 0
+  fi
+
+  # Check for all-tests-passed indicators
+  if echo "$output" | grep -qiE '(all.*(test|check|smoke).*(pass|green|success)|0 (fail|error))'; then
+    echo "ALL_PASSED"
+    return 0
+  fi
+
+  # Check for clean/no-issues indicators
+  if echo "$output" | grep -qiE '(no (critical|issue|problem).*found|verification.*(clean|pass|complete)|all.*(task|check|requirement).*(complete|pass|met))'; then
+    echo "CLEAN"
+    return 0
+  fi
+
+  # Default: unknown — caller must handle
+  echo "UNKNOWN"
+  return 0
 }
 
 # Helper: extract issue summary from verify output for next iteration prompt
@@ -94,9 +93,9 @@ extract_issues() {
     echo "$headers"
     return
   fi
-  # Fallback: extract the "Issues by Priority" section
+  # Fallback: extract the "Issues" section
   local section
-  section=$(echo "$output" | sed -n '/##.*Issue.*Priority/,/^##\|^$/p' | head -30) || true
+  section=$(echo "$output" | sed -n '/###.*Issue/,/^###\|^$/p' | head -30) || true
   if [ -n "$section" ]; then
     echo "$section"
     return
@@ -166,8 +165,8 @@ You MUST end your response with exactly one of these assessment lines on its own
 (for triage, also: ASSESSMENT: HAS_CODE_FIXES, ASSESSMENT: DOCS_ONLY)
 (for apply+test, also: ASSESSMENT: ALL_PASSED, ASSESSMENT: HAS_FAILURES)
 
-If you find any CRITICAL or WARNING issues, use ASSESSMENT: HAS_ISSUES (not CLEAN).
-If everything passes with no issues, use ASSESSMENT: CLEAN.
+If you found ANY issues (even just warnings), use ASSESSMENT: HAS_ISSUES — NOT CLEAN.
+If everything truly passes with zero issues, use ASSESSMENT: CLEAN.
 
 Format each issue as a line starting with the priority:
 CRITICAL: file:line — description
@@ -175,6 +174,7 @@ WARNING: file:line — description
 SUGGESTION: description
 
 Do NOT use markdown headers for issues. Use the line-prefix format above.
+This format is parsed by automation — you MUST follow it exactly.
 === END FORMAT ==='
 
 SESSION="opsx-$CHANGE_NAME"
@@ -219,7 +219,10 @@ while [ "$ITERATION" -le "$MAX_ITERATIONS" ]; do
       # Carry forward for next iteration
       PREV_VERIFY=$(extract_issues "$OUTPUT")
 
-      if detect_assessment "$OUTPUT" "ASSESSMENT: CLEAN"; then
+      ASSESSMENT=$(detect_assessment "$OUTPUT")
+      echo ">>> Verify assessment: $ASSESSMENT"
+
+      if [ "$ASSESSMENT" = "CLEAN" ]; then
         if [ "$IS_FOCUSED_VERIFY" = true ]; then
           # Focused re-verify came back clean — schedule one final full scan
           echo "VERIFY CLEAN (focused) — scheduling final full re-verification"
@@ -235,6 +238,7 @@ while [ "$ITERATION" -le "$MAX_ITERATIONS" ]; do
           break
         fi
       else
+        # HAS_ISSUES, UNKNOWN, or any other assessment — proceed to triage
         echo "VERIFY HAS_ISSUES — proceeding to triage"
         commit "verify" "$ITERATION"
         STATE="triage"
@@ -255,29 +259,32 @@ while [ "$ITERATION" -le "$MAX_ITERATIONS" ]; do
       echo "$OUTPUT"
       echo "$OUTPUT" > "$CYCLE_DIR/${ITERATION}-triage.txt"
 
-      if detect_assessment "$OUTPUT" "ASSESSMENT: HAS_CODE_FIXES"; then
+      ASSESSMENT=$(detect_assessment "$OUTPUT")
+      echo ">>> Triage assessment: $ASSESSMENT"
+
+      if [ "$ASSESSMENT" = "HAS_CODE_FIXES" ]; then
         echo "TRIAGE found code fixes — proceeding to apply+test"
         commit "triage" "$ITERATION"
         STATE="applytest"
-      elif detect_assessment "$OUTPUT" "ASSESSMENT: DOCS_ONLY"; then
+      elif [ "$ASSESSMENT" = "DOCS_ONLY" ]; then
         echo "TRIAGE fixed docs only — looping back to verify"
         commit "triage" "$ITERATION"
         STATE="verify"
         ITERATION=$((ITERATION + 1))
-      elif detect_assessment "$OUTPUT" "ASSESSMENT: CLEAN"; then
-        echo "TRIAGE found nothing to fix — cycle complete"
+      elif [ "$ASSESSMENT" = "CLEAN" ]; then
+        echo "TRIAGE found nothing to fix — cycle complete!"
         commit "triage" "$ITERATION"
         STATE="COMPLETE"
         break
       else
-        # No assessment marker found — default to HAS_CODE_FIXES if any issues were mentioned
+        # UNKNOWN or other — default to has issues if any mentioned
         echo "TRIAGE — no clear assessment marker, checking for issues..."
-        if echo "$OUTPUT" | grep -qiE "(CRITICAL|WARNING|fix|bug|missing|inconsisten)"; then
-          echo "TRIAGE found mentioned issues — proceeding to apply+test"
+        if echo "$OUTPUT" | grep -qiE '(CRITICAL|WARNING)[: ]'; then
+          echo "Issues mentioned — proceeding to apply+test"
           commit "triage" "$ITERATION"
           STATE="applytest"
         else
-          echo "TRIAGE found nothing actionable — looping back to verify"
+          echo "No issues mentioned — looping back to verify"
           commit "triage" "$ITERATION"
           STATE="verify"
           ITERATION=$((ITERATION + 1))
@@ -301,19 +308,22 @@ while [ "$ITERATION" -le "$MAX_ITERATIONS" ]; do
       echo "$OUTPUT"
       echo "$OUTPUT" > "$CYCLE_DIR/${ITERATION}-applytest.txt"
 
-      if detect_assessment "$OUTPUT" "ASSESSMENT: ALL_PASSED"; then
+      ASSESSMENT=$(detect_assessment "$OUTPUT")
+      echo ">>> Apply+test assessment: $ASSESSMENT"
+
+      if [ "$ASSESSMENT" = "ALL_PASSED" ]; then
         echo "ALL TESTS PASSED — proceeding to verify"
         commit "applytest" "$ITERATION"
         STATE="verify"
         ITERATION=$((ITERATION + 1))
-      elif detect_assessment "$OUTPUT" "ASSESSMENT: HAS_FAILURES"; then
+      elif [ "$ASSESSMENT" = "HAS_FAILURES" ]; then
         echo "HAS FAILURES — proceeding to explore"
         commit "applytest" "$ITERATION"
         STATE="explore"
       else
-        # No assessment marker — check for pass/fail indicators
+        # UNKNOWN or other — check for pass/fail indicators
         echo "APPLY & TEST — no clear assessment marker, checking results..."
-        if echo "$OUTPUT" | grep -qiE "(test.*(fail|error|broken)|smoke.*fail)"; then
+        if echo "$OUTPUT" | grep -qiE '(test.*(fail|error|broken)|smoke.*fail)'; then
           echo "HAS FAILURES (detected) — proceeding to explore"
           commit "applytest" "$ITERATION"
           STATE="explore"
