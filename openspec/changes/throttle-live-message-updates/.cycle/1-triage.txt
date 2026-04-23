@@ -1,0 +1,14 @@
+ROUTED TO KIMI:
+CRITICAL: flux/kawa/src/live-message-throttler.ts:38-44 — `scheduleUpdate`'s timer callback sets `ctx.lastSentText = textToSend` in the `.then()` handler without checking `ctx.generation` for staleness. In contrast, `flush()` has a `if (ctx.generation !== gen) return;` guard before setting `lastSentText`. This inconsistency means a stale `lastSentText` value could be written if a generation change occurs during the async `updateLiveMessage` call. Fix: capture `ctx.generation` before calling `this.sender.updateLiveMessage()` and check `if (ctx.generation !== gen) return;` in the `.then()` handler before setting `ctx.lastSentText`.
+
+DOCUMENTATION UPDATED:
+- specs/kawa-message-sender/spec.md: Fixed method name typo `sender.updateMessage` → `sender.updateLiveMessage` in the Throttled update path scenario.
+- tasks.md: Added task 1.12 documenting the `lastSentText: string` field on `ContactContext` interface, and task 1.13 documenting its initialization to `""` in session creation/reset paths.
+- design.md: Added mention of `lastSentText` in Decision 3 (Throttle state lives on ContactContext).
+
+FILED AS ISSUES (scope increase — not for this cycle):
+ISSUE: [MessageSender.updateLiveMessage ignores its `text` parameter] — The method accepts `text` but ignores it, always reading `ctx.accumulatedText` directly. All current callers pass `ctx.accumulatedText` so behavior is correct, but the unused parameter is misleading and could cause future bugs if a caller passes a different value expecting it to be used.
+  Source: flux/kawa/src/message-sender.ts:35
+  Scope: code quality / latent bug
+
+ASSESSMENT: HAS_CODE_FIXES

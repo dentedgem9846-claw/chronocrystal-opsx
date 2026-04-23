@@ -78,7 +78,7 @@ agent_end event
 
 **Choice:** Add `throttleTimer: ReturnType<typeof setTimeout> | null` to `ContactContext`.
 
-**Rationale:** Throttle state is per-contact and per-session. When a session is torn down (new prompt, `/new`, disconnect), the timer must be cleared. Storing it on the context ensures it's always accessible alongside the `liveMessageState` it's tied to.
+**Rationale:** Throttle state is per-contact and per-session. When a session is torn down (new prompt, `/new`, disconnect), the timer must be cleared. Storing it on the context ensures it's always accessible alongside the `liveMessageState` it's tied to. Also add `lastSentText: string` for the no-op flush optimization (skip update when text hasn't changed since last send).
 
 ### Decision 4: Flush before tool markers, not after
 

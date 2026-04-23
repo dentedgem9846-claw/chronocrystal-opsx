@@ -19,4 +19,4 @@ When a `LiveMessageThrottler` is active, `updateLiveMessage` calls from `handleA
 #### Scenario: Throttled update path
 - **WHEN** `handleAgentEvent` processes a `message_update` event while a LiveMessageThrottler is active
 - **THEN** `handleAgentEvent` SHALL call `throttler.scheduleUpdate(ctx)` instead of `sender.updateLiveMessage(ctx, ctx.accumulatedText)`
-- **AND** the throttler SHALL eventually call `sender.updateMessage(ctx, ctx.accumulatedText)` when the throttle interval fires or on flush
+- **AND** the throttler SHALL eventually call `sender.updateLiveMessage(ctx, ctx.accumulatedText)` when the throttle interval fires or on flush
