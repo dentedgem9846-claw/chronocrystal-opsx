@@ -37,7 +37,7 @@
 - [x] 3.8 Implement inline code preservation: `` `code` `` passes through unchanged
 - [x] 3.9 Implement link preservation: `[text](url)` passes through unchanged
 - [x] 3.10 Implement nested formatting handling: `***bold italic***` → `_*bold italic*_`
-- [x] 3.11 Implement SimpleX-native passthrough: text already in SimpleX format (`*bold*`, `_italic_`) passes through unchanged (no double-conversion)
+- [x] 3.11 Implement SimpleX-native passthrough: text already in SimpleX format (`_italic_`, `~strike~`) passes through unchanged (no double-conversion). `*bold*` is an ambiguous case (indistinguishable from standard `*italic*` with regex) and is treated as standard italic per the conversion rules.
 - [x] 3.12 Add unit tests in `tests/markdown-to-simplex.test.ts` for all conversion rules
 
 ## 6. Integrate markdown conversion into EventFormatter

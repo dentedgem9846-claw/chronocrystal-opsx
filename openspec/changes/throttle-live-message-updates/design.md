@@ -162,7 +162,7 @@ The `EventFormatter` is already responsible for formatting agent events. Adding 
 |------|-----------|
 | Throttle interval too long → text appears choppy | Default 200ms is below human perception threshold for "lag" (~250ms). Configurable via env var. |
 | Timer not cleaned up on session teardown → memory leak | `removeByContactId` and session reset both call `LiveMessageThrottler.cancel()`. Timer reference on `ContactContext` makes cleanup straightforward. |
-| Race between timer fire and flush (e.g., timer fires after agent_end flushes) | `flush` cancels the timer. Timer callback checks `ctx.throttleTimer === null` to detect cancellation and skips the update. |
+| Race between timer fire and flush (e.g., timer fires after agent_end flushes) | `flush` cancels the timer synchronously. Because JavaScript's event loop is single-threaded, `clearTimeout` completes before any timer callback can fire, so the cancelled timer never executes. The callback therefore does not need an explicit `ctx.throttleTimer === null` check, though `flush()` does set it to `null`. |
 | Throttle breaks write-before-yield invariant | The invariant still holds: `ctx.accumulatedText` is written synchronously before the throttler is called. Only the I/O call is deferred. |
 | Network error during throttled update leaves display stale | Same error path as current code — `updateLiveMessage` silently logs and continues. No new failure mode. |
 | Markdown dialect conversion has edge cases (nested, ambiguous) | Common patterns covered by explicit regex rules. Unrecognized markdown passes through (SimpleX renders as-is, which is no worse than current raw `**`). |

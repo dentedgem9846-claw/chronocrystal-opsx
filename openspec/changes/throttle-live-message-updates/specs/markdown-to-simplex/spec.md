@@ -84,11 +84,14 @@ Content inside fenced code blocks (``` delimiters) SHALL NOT be subject to markd
 - **AND** only markdown syntax outside code blocks SHALL be converted
 
 ### Requirement: Preserving SimpleX-native formatting
-The conversion SHALL NOT modify text that is already in SimpleX's markdown format. If text already uses SimpleX syntax (`*bold*`, `_italic_`, `~strike~`), it SHALL pass through unchanged.
+The conversion SHALL NOT modify text that is already in SimpleX's markdown format, except where standard markdown syntax and SimpleX syntax are ambiguous. If text already uses SimpleX syntax (`_italic_`, `~strike~`), it SHALL pass through unchanged.
+
+> **Known limitation:** The regex-based converter cannot distinguish SimpleX-native `*bold*` (single asterisk) from standard markdown `*italic*` (single asterisk). Because standard markdown interpretation takes precedence in ambiguous cases, `*text*` is always converted to `_text_`. The `.pi/SYSTEM.md` prompt instructs the LLM to use `*bold*` for bold and `_italic_` for italic, so well-behaved LLM output will have `*bold*` preserved natively while `_italic_` passes through unchanged. This is an accepted tradeoff of the regex-based approach.
 
 #### Scenario: Already-correct SimpleX bold
 - **WHEN** `extractMessageText` receives text containing `*correct bold*`
 - **THEN** the output SHALL contain `*correct bold*` unchanged
+- **NOTE** This scenario assumes the text is unambiguous SimpleX bold. Due to the regex limitation described above, `*text*` produced by an LLM that does NOT follow the system prompt may be treated as standard italic and converted to `_text_`.
 
 #### Scenario: Already-correct SimpleX italic
 - **WHEN** `extractMessageText` receives text containing `_correct italic_`
