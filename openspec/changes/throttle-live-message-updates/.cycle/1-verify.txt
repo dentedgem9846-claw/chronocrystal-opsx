@@ -1,24 +1,47 @@
-Now I have all the information needed for a comprehensive assessment. Let me compile the findings:
+I have completed the full verification. Here is my assessment:
 
-**`npm run check`** — PASS (tsc, biome, build all clean)
-**`npm test`** — PASS (34/34 unit tests pass)
+---
 
-Now documenting all issues found in the cross-verification:
+**Verification Summary for `throttle-live-message-updates`**
 
-WARNING: flux/kawa/src/message-sender.ts:35 — `updateLiveMessage(ctx, text)` accepts a `text` parameter but ignores it, always using `ctx.accumulatedText` instead. Already filed in issues.md but unfixed. This is a latent bug — all current callers pass `ctx.accumulatedText` as `text`, but any future caller passing a different value would get surprising behavior.
+**kawa-check (`npm run check`):** PASSED — tsc --noEmit + biome check both clean.
 
-WARNING: flux/kawa/src/session-manager.ts:92 — `closeAll()` does not cancel throttle timers via `this.throttler?.cancel()`. `removeByContactId` correctly cancels timers, but `closeAll` only calls `unsubscribe()`. Works in practice because shutdown follows with `process.exit(0)`, but is a defensive programming gap if `closeAll` is ever called without process exit.
+**Unit tests (markdown-to-simplex):** 34/34 PASSED.
 
-WARNING: flux/kawa/src/commands.ts:52 — `/help` command text uses standard markdown `**Kawa Commands**` instead of SimpleX markdown `*Kawa Commands*`. Since `sendTextMessage` does not go through `EventFormatter.extractMessageText` (where `convertMarkdownToSimplex` is applied), this renders as raw `**Kawa Commands**` in SimpleX Chat.
+**E2E tests:** All skipped/failed due to infrastructure (SimpleX ports `EADDRINUSE`, connection errors) — not related to this change's code.
 
-WARNING: flux/kawa/src/commands.ts:122 — `/status` command text uses standard markdown `**Session Status**` instead of SimpleX markdown `*Session Status*`. Same issue as `/help`.
+**Spec-to-Code Alignment:**
 
-WARNING: openspec/changes/throttle-live-message-updates/specs/markdown-to-simplex/spec.md — "Already-correct SimpleX bold" scenario states `*correct bold*` SHALL pass through unchanged, but the code converts `*text*` → `_text_`. The NOTE qualifies this limitation, but the SHALL statement is technically incorrect. The corresponding test at flux/kawa/tests/markdown-to-simplex.test.ts:139 is empty (no assertions), providing no coverage.
+| Spec Requirement | Status | Notes |
+|---|---|---|
+| LiveMessageThrottler class in `src/live-message-throttler.ts` | ✅ | |
+| `scheduleUpdate` buffers text, starts/resets timer | ✅ | Reads `ctx.accumulatedText` at timer-fire time (correct coalescing) |
+| `flush` cancels timer + sends immediately + generation check | ✅ | |
+| `cancel` cancels timer, no update sent | ✅ | |
+| `liveMessageUpdateIntervalMs` in config, default 200 | ✅ | |
+| `KAWA_LIVE_MSG_UPDATE_INTERVAL_MS` env var | ✅ | Parsed in `main()` |
+| `throttleTimer` + `lastSentText` on ContactContext | ✅ | Properly typed and initialized |
+| Timer cleanup on `/new` and `removeByContactId` | ✅ | Both call `throttler.cancel()` |
+| `handleIncomingMessage` resets state + cancels timer | ✅ | |
+| `message_update` STREAMING → `throttler.scheduleUpdate` | ✅ | |
+| `message_update` IDLE → `startLiveMessage` immediate | ✅ | |
+| `tool_execution_start/end` flush before append | ✅ | |
+| `agent_end` flush before finalize | ✅ | |
+| Markdown conversion `**→*`, `*→_`, `~~→~`, `__→_` | ✅ | |
+| Code blocks and inline code protected | ✅ | |
+| Heading `#` stripped (not `#...#` wrapped) | ✅ | |
+| Links, emojis, newlines preserved | ✅ | |
+| Nested `***bold italic***` → `_*bold italic*_` | ✅ | |
+| Conversion in `extractMessageText` only, not `formatEventAppend` | ✅ | |
+| `.pi/SYSTEM.md` with SimpleX dialect rules | ✅ | |
+| Write-before-yield invariant preserved | ✅ | All state writes synchronous before awaits |
+| Generation-based staleness detection in flush | ✅ | |
+| No throttle on `startLiveMessage` or `finalizeLiveMessage` | ✅ | |
 
-WARNING: openspec/changes/throttle-live-message-updates/tasks.md:19 — Task 1.11 specifies "cancel before incrementing generation" but flux/kawa/src/kawa.ts:574-575 increments `ctx.generation++` before calling `throttler.cancel(ctx)`. Behavior is correct due to JS single-threading (no yield between them), but order doesn't match the task spec.
+**Issues Found:**
 
-SUGGESTION: openspec/changes/throttle-live-message-updates/design.md — Decision 7 states `discoverSystemPromptFile()` checks `<agentDir>/.pi/SYSTEM.md`, but the actual implementation (resource-loader.js:665) checks `<agentDir>/SYSTEM.md`. The SYSTEM.md is correctly found at `flux/kawa/.pi/SYSTEM.md`, so no functional impact, but the design description is inaccurate.
+WARNING: flux/kawa/src/kawa.ts:162 — Error handler in `wireSessionEvents` does not cancel the throttle timer. When `handleAgentEvent` throws, the `.catch()` handler resets `liveMessageState` to `"IDLE"`, `liveMessageItemId` to `null`, and `accumulatedText` to `""`, but does NOT call `throttler.cancel(ctx)`. The `throttler` variable is available in the closure scope (it's a parameter to `wireSessionEvents`). A pending throttle timer will therefore fire after error recovery, calling `sender.updateLiveMessage()` which silently skips due to `null` `liveMessageItemId`, but produces a spurious warning log (`"No live message item ID for contact X, skipping update"`). Also, `lastSentText` is not reset in this error path. Fix: add `throttler.cancel(ctx)` and `ctx.lastSentText = ""` to the catch handler, after the generation check.
 
-SUGGESTION: flux/kawa/tests/markdown-to-simplex.test.ts:139 — The test "preserves already-correct SimpleX bold *text*" has no assertions — it only contains comments. Should either assert the documented behavior (`expect(convertMarkdownToSimplex('*correct bold*')).toBe('_correct bold_')`) or be removed.
+SUGGESTION: flux/kawa/src/message-sender.ts:52 — `finalizeLiveMessage` resets `accumulatedText`, `liveMessageState`, and `liveMessageItemId` but not `lastSentText`. While not a functional bug (every caller path resets `lastSentText` separately before or after), the inconsistency is confusing. Consider also resetting `ctx.lastSentText = ""` for completeness and defensive coding.
 
 ASSESSMENT: HAS_ISSUES
