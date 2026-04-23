@@ -1,0 +1,14 @@
+```
+ROUTED TO KIMI:
+WARNING: flux/kawa/src/live-message-throttler.ts:30-45 — `lastSentText` set in `.then()` callback even when `updateLiveMessage` skips the actual send (because `liveMessageItemId === null`). This happens when a throttle timer fires before `startLiveMessage` resolves. The `.then()` resolves successfully (since `updateLiveMessage` returns `Promise<void>` after logging a warning) and sets `lastSentText` to a text value that was never sent to SimpleX. This could cause the no-op flush optimization to incorrectly skip a legitimate update. The impact is limited: `finalizeLiveMessage` always sends regardless of `lastSentText`, so the final message is always correct. At worst, intermediate streaming display may momentarily lag. Recommendation: Either (a) have `updateLiveMessage` return a boolean/sentinel indicating whether the update was actually sent, so `.then()` can conditionally set `lastSentText`, or (b) move `lastSentText` reset into the timer callback only after verifying `ctx.liveMessageItemId !== null`.
+
+DOCUMENTATION UPDATED:
+- None needed
+
+FILED AS ISSUES (scope increase — not for this cycle):
+ISSUE: [Add validation for KAWA_LIVE_MSG_UPDATE_INTERVAL_MS env var] — The env var parsing uses `Number(process.env.KAWA_LIVE_MSG_UPDATE_INTERVAL_MS ?? default)`. If set to empty string `""`, `Number("")` returns `0`, causing `setTimeout(cb, 0)` which defers to next tick rather than applying the intended throttle interval. If set to a non-numeric string, `Number()` returns `NaN`, which `setTimeout` coerces to `0`. Consider adding validation: reject `NaN`, negative values, and empty string; warn and fall back to default. Also consider whether `interval=0` should bypass the throttler completely (direct call to `sender.updateLiveMessage`).
+  Source: flux/kawa/src/kawa.ts:292
+  Scope: code quality / config robustness
+
+ASSESSMENT: HAS_CODE_FIXES
+```

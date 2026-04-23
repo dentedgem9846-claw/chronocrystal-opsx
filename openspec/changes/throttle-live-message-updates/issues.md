@@ -9,3 +9,8 @@ ISSUE: [MessageSender.updateLiveMessage ignores its `text` parameter] — The `M
   Source: flux/kawa/src/message-sender.ts:35
   Scope: code quality / latent bug
 
+ISSUE: [Add validation for KAWA_LIVE_MSG_UPDATE_INTERVAL_MS env var] — The env var parsing in `kawa.ts` uses `Number(process.env.KAWA_LIVE_MSG_UPDATE_INTERVAL_MS ?? default)`. If set to empty string `""`, `Number("")` returns `0`, causing `setTimeout(cb, 0)` which defers to next tick rather than applying the intended throttle interval. If set to a non-numeric string, `Number()` returns `NaN`, which `setTimeout` coerces to `0`. Consider adding validation: reject `NaN`, negative values, and empty string; warn and fall back to default. Also consider whether `interval=0` should bypass the throttler completely (direct call to `sender.updateLiveMessage`).
+
+  Source: flux/kawa/src/kawa.ts:292
+  Scope: code quality / config robustness
+
