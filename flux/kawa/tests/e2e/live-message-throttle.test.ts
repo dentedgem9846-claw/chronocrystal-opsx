@@ -32,12 +32,12 @@ describe("live-message-throttle", () => {
 	 *     a flood of updates creates a backlog that delays the final message.
 	 *
 	 * Expected results by interval:
-	 *   interval=0  (unthrottled): 75-100 commands, ~20-45s delivery
-	 *   interval=50 (throttled):    ~5-15 commands,  ~3-5s delivery
-	 *   interval=200 (conservative): ~3-8 commands, ~3-5s delivery
+	 *   interval=1  (near-unthrottled): many commands, slow delivery
+	 *   interval=50 (throttled):         ~5-15 commands, ~3-5s delivery
+	 *   interval=200 (conservative):     ~3-8 commands,  ~3-5s delivery
 	 *
-	 * Run with KAWA_LIVE_MSG_UPDATE_INTERVAL_MS=0 to confirm the unthrottled baseline,
-	 * then with the default (50) to see the improvement.
+	 * Run with KAWA_LIVE_MSG_UPDATE_INTERVAL_MS=1 for near-unthrottled comparison.
+	 * Note: interval=0 is rejected at startup by parsePositiveInt().
 	 */
 	it("throttled updates reduce command count and deliver messages faster", async () => {
 		console.log(`[test] throttle interval: ${throttleMs}ms`);
@@ -65,7 +65,7 @@ describe("live-message-throttle", () => {
 		// When throttled (interval > 0), command count should be well below
 		// unthrottled baseline (75-100). We expect ~5-15 updates per response.
 		// Using 30 as a generous upper bound to avoid flaky failures.
-		if (Number(throttleMs) > 0) {
+		if (Number(throttleMs) > 1) {
 			if (cmdCount > 0) {
 				expect(cmdCount).toBeLessThan(30);
 				console.log(`[test] throttle: ✓ ${cmdCount} commands < 30`);
@@ -75,14 +75,14 @@ describe("live-message-throttle", () => {
 			}
 
 			// Throttled delivery should complete in under 15s for a short paragraph.
-			// Unthrottled (interval=0) typically takes 20-45s due to CLI backlog.
+			// Near-unthrottled (interval=1) typically takes much longer due to CLI backlog.
 			expect(totalMs).toBeLessThan(15000);
 			console.log(`[test] throttle: ✓ ${totalMs}ms < 15000ms (delivery speed)`);
 		} else {
-			// interval=0 (unthrottled): expect high command count and slow delivery.
+			// interval=1 (near-unthrottled): expect high command count and slow delivery.
 			// These are NOT hard assertions — just logging for comparison.
 			console.log(
-				`[test] unthrottled baseline: ${cmdCount} commands, ${totalMs}ms delivery (for comparison)`,
+				`[test] near-unthrottled baseline: ${cmdCount} commands, ${totalMs}ms delivery (for comparison)`,
 			);
 		}
 	}, 300000);

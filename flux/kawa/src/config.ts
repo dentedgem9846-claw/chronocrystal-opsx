@@ -1,4 +1,26 @@
 /**
+ * A positive integer (> 0) used for throttle intervals.
+ * Prevents misconfiguration like interval=0 which causes
+ * race conditions (setTimeout(fn, 0) fires before startLiveMessage
+ * sets liveMessageItemId) and command flooding.
+ *
+ * Use `parsePositiveInt` to safely construct from env vars.
+ */
+export type PositiveInt = number & { __brand: "PositiveInt" };
+
+/**
+ * Parse a value as a PositiveInt, throwing if <= 0 or NaN.
+ */
+export function parsePositiveInt(value: number, name: string): PositiveInt {
+	if (!Number.isFinite(value) || value <= 0 || !Number.isInteger(value)) {
+		throw new Error(
+			`${name} must be a positive integer, got: ${value}. A value of 0 or negative would disable throttling and cause command flooding.`,
+		);
+	}
+	return value as PositiveInt;
+}
+
+/**
  * Configuration for Kawa.
  */
 export interface KawaConfig {
@@ -20,8 +42,8 @@ export interface KawaConfig {
 	addressApiPort: number;
 	/** Tool output truncation line limit */
 	toolTruncationLines: number;
-	/** Throttle interval for live message updates (ms). Reduces SimpleX command volume by batching updates. */
-	liveMessageUpdateIntervalMs: number;
+	/** Throttle interval for live message updates (ms). Must be > 0. Reduces SimpleX command volume by batching updates. */
+	liveMessageUpdateIntervalMs: PositiveInt;
 	/** Backoff settings for SimpleX CLI restart */
 	restartBackoff: {
 		initialMs: number;
@@ -40,7 +62,7 @@ export const defaultConfig: KawaConfig = {
 	maxSessions: 3,
 	addressApiPort: 8080,
 	toolTruncationLines: 5,
-	liveMessageUpdateIntervalMs: 200,
+	liveMessageUpdateIntervalMs: parsePositiveInt(200, "liveMessageUpdateIntervalMs default"),
 	restartBackoff: {
 		initialMs: 1000,
 		maxMs: 30000,

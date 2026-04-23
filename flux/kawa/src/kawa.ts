@@ -23,7 +23,7 @@ import type * as T from "@simplex-chat/types";
 import { ChatPeerType } from "@simplex-chat/types/dist/types.js";
 import { ChatClient } from "simplex-chat";
 import { CommandHandler } from "./commands.js";
-import { type KawaConfig, defaultConfig } from "./config.js";
+import { type KawaConfig, defaultConfig, parsePositiveInt } from "./config.js";
 import { EventFormatter, extractTextFromContent } from "./event-formatter.js";
 import { LiveMessageThrottler } from "./live-message-throttler.js";
 import { MessageSender } from "./message-sender.js";
@@ -286,8 +286,11 @@ async function main() {
 		toolTruncationLines: Number(
 			process.env.KAWA_TOOL_TRUNCATION_LINES ?? defaultConfig.toolTruncationLines,
 		),
-		liveMessageUpdateIntervalMs: Number(
-			process.env.KAWA_LIVE_MSG_UPDATE_INTERVAL_MS ?? defaultConfig.liveMessageUpdateIntervalMs,
+		liveMessageUpdateIntervalMs: parsePositiveInt(
+			Number(
+				process.env.KAWA_LIVE_MSG_UPDATE_INTERVAL_MS ?? defaultConfig.liveMessageUpdateIntervalMs,
+			),
+			"KAWA_LIVE_MSG_UPDATE_INTERVAL_MS",
 		),
 	};
 

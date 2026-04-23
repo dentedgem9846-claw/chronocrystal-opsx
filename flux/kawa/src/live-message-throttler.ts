@@ -1,3 +1,4 @@
+import type { PositiveInt } from "./config.js";
 import type { MessageSender } from "./message-sender.js";
 import type { ContactContext } from "./session-manager.js";
 
@@ -14,7 +15,7 @@ import type { ContactContext } from "./session-manager.js";
 export class LiveMessageThrottler {
 	constructor(
 		private sender: MessageSender,
-		private intervalMs: number,
+		private intervalMs: PositiveInt,
 	) {}
 
 	/**
