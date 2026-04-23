@@ -62,7 +62,7 @@ export const defaultConfig: KawaConfig = {
 	maxSessions: 3,
 	addressApiPort: 8080,
 	toolTruncationLines: 5,
-	liveMessageUpdateIntervalMs: parsePositiveInt(200, "liveMessageUpdateIntervalMs default"),
+	liveMessageUpdateIntervalMs: parsePositiveInt(50, "liveMessageUpdateIntervalMs default"),
 	restartBackoff: {
 		initialMs: 1000,
 		maxMs: 30000,
