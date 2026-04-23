@@ -35,9 +35,11 @@ export class LiveMessageThrottler {
 			// Skip if text hasn't changed since last send
 			if (ctx.accumulatedText === ctx.lastSentText) return;
 			const textToSend = ctx.accumulatedText;
+			const gen = ctx.generation;
 			this.sender
 				.updateLiveMessage(ctx, textToSend)
 				.then(() => {
+					if (ctx.generation !== gen) return;
 					ctx.lastSentText = textToSend;
 				})
 				.catch((err) => {
