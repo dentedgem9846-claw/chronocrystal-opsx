@@ -1,5 +1,0 @@
-FIXED: `flux/kawa/src/kawa.ts` — Added `throttler.cancel(ctx)` and `ctx.lastSentText = ""` to the error handler in `wireSessionEvents` so that pending throttle timers are cancelled and throttle state is fully cleared when `handleAgentEvent` throws.
-
-FIXED: `flux/kawa/src/message-sender.ts` — Added `ctx.lastSentText = ""` to `finalizeLiveMessage` so throttle state is reset defensively alongside `accumulatedText`, `liveMessageState`, and `liveMessageItemId`.
-
-ASSESSMENT: ALL_PASSED
