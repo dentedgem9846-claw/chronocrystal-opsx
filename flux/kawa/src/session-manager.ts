@@ -19,6 +19,8 @@ export interface ContactContext {
 	liveMessageState: LiveMessageState;
 	/** Unsubscribe function for the session event listener */
 	unsubscribe: (() => void) | null;
+	/** Generation counter for cross-path staleness detection. Incremented on new prompt or /new. */
+	generation: number;
 }
 
 /**

@@ -59,6 +59,9 @@ export class CommandHandler {
 	private async handleNew(contactId: number): Promise<void> {
 		const oldCtx = this.sessionManager.getByContactId(contactId);
 		if (oldCtx) {
+			// Increment generation to invalidate any in-flight agent events
+			oldCtx.generation++;
+
 			// Finalize any stuck live message before aborting (Task 2.4)
 			if (oldCtx.liveMessageState === "STREAMING") {
 				await this.messageSender.finalizeLiveMessage(oldCtx);

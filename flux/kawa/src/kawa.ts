@@ -129,6 +129,7 @@ async function createSessionForContact(
 			accumulatedText: "",
 			liveMessageState: "IDLE",
 			unsubscribe: null,
+			generation: 0,
 		};
 
 		const added = sessions.add(ctx);
@@ -153,9 +154,12 @@ function wireSessionEvents(
 	formatter: EventFormatter,
 ): void {
 	const listener = (event: AgentSessionEvent) => {
+		const gen = ctx.generation;
 		handleAgentEvent(ctx, event, sender, formatter).catch((err) => {
 			console.error(`[kawa] Error handling agent event for contact ${ctx.contactId}:`, err);
-			// Finalize live message on error
+			// Only reset state if this error belongs to the current generation
+			// Otherwise a stale error from a prior prompt could corrupt the new session's state
+			if (ctx.generation !== gen) return;
 			ctx.liveMessageState = "IDLE";
 			ctx.liveMessageItemId = null;
 			ctx.accumulatedText = "";
@@ -174,6 +178,9 @@ async function handleAgentEvent(
 	sender: MessageSender,
 	formatter: EventFormatter,
 ): Promise<void> {
+	// Capture generation before any await to detect stale events after cross-path resets
+	const gen = ctx.generation;
+
 	switch (event.type) {
 		case "message_update": {
 			// Extract text from the assistant message
@@ -182,14 +189,17 @@ async function handleAgentEvent(
 				ctx.accumulatedText = text;
 				if (ctx.liveMessageState === "IDLE") {
 					// IDLE → STREAMING: start a live message with liveMessage: true
-					const result = await sender.startLiveMessage(ctx.contactId, ctx.accumulatedText);
+					// Set state synchronously BEFORE the await to prevent race conditions
+					ctx.liveMessageState = "STREAMING";
+					const result = await sender.startLiveMessage(ctx, ctx.accumulatedText);
+					if (ctx.generation !== gen) return; // stale event, discard silently
 					if (result) {
 						ctx.liveMessageItemId = result.itemId;
 					}
-					ctx.liveMessageState = "STREAMING";
 				} else {
 					// STREAMING: update existing live message
 					await sender.updateLiveMessage(ctx, ctx.accumulatedText);
+					if (ctx.generation !== gen) return; // stale event, discard silently
 				}
 			}
 			break;
@@ -198,8 +208,10 @@ async function handleAgentEvent(
 		case "tool_execution_start": {
 			const append = formatter.formatEventAppend(event);
 			if (append) {
+				// Append synchronously BEFORE the await to prevent race conditions
 				ctx.accumulatedText += append;
 				await sender.updateLiveMessage(ctx, ctx.accumulatedText);
+				if (ctx.generation !== gen) return; // stale event, discard silently
 			}
 			break;
 		}
@@ -207,19 +219,25 @@ async function handleAgentEvent(
 		case "tool_execution_end": {
 			const append = formatter.formatEventAppend(event);
 			if (append) {
+				// Append synchronously BEFORE the await to prevent race conditions
 				ctx.accumulatedText += append;
 				await sender.updateLiveMessage(ctx, ctx.accumulatedText);
+				if (ctx.generation !== gen) return; // stale event, discard silently
 			}
 			break;
 		}
 
 		case "agent_end": {
+			// Check generation BEFORE side effects to prevent stale I/O
+			if (ctx.generation !== gen) return; // stale event, discard silently
 			// Finalize the live message
 			if (ctx.liveMessageState === "IDLE" && !ctx.accumulatedText) {
 				// Agent ended without producing any output — send a fallback message
 				await sender.sendTextMessage(ctx.contactId, "(Agent finished with no output)");
+				if (ctx.generation !== gen) return; // stale after await, discard silently
 			} else {
 				await sender.finalizeLiveMessage(ctx);
+				if (ctx.generation !== gen) return; // stale after await, discard silently
 			}
 			break;
 		}
@@ -488,11 +506,14 @@ async function handleIncomingMessage(
 		}
 	}
 
-	// Send the prompt to the agent — followUp queues if streaming, prompt when idle
+	// Increment generation to invalidate any in-flight agent events from prior prompts.
+	// Only increment for new prompts — followUp does NOT reset the context,
+	// it queues a message on the current stream, so in-flight events remain valid.
 	try {
 		if (ctx.session.state.isStreaming) {
 			await ctx.session.followUp(text);
 		} else {
+			ctx.generation++;
 			ctx.liveMessageState = "IDLE";
 			ctx.accumulatedText = "";
 			ctx.liveMessageItemId = null;

@@ -1,0 +1,154 @@
+Good — no forbidden patterns, and `npm run check` passes cleanly. Now I have everything needed for the full verification report.
+
+---
+
+## Verification Report: `fix-live-message-race`
+
+### Summary
+
+| Dimension    | Status |
+|--------------|--------|
+| Completeness | 12/12 tasks complete, 7/7 requirements implemented |
+| Correctness  | 7/7 requirements covered, 1 scenario gap noted |
+| Coherence    | Follows all 4 design decisions, 1 edge case found |
+
+### kawa-check Result
+
+```
+✅ npm run check (tsc --noEmit + biome check + tsc) — PASSED (exit 0, zero errors/warnings)
+```
+
+---
+
+### Completeness
+
+**Task Completion: 12/12** ✅
+
+| Task | Status | Evidence |
+|------|--------|----------|
+| 1.1 Add `generation: number` to `ContactContext` | ✅ | `session-manager.ts:23` |
+| 1.2 Initialize `generation: 0` in new contexts | ✅ | `kawa.ts:132` |
+| 2.1 IDLE→STREAMING: state write before await | ✅ | `kawa.ts:190` — `ctx.liveMessageState = "STREAMING"` before `await sender.startLiveMessage()` |
+| 2.2 Accumulated text append before await | ✅ | `kawa.ts:209` and `kawa.ts:220` — `ctx.accumulatedText += append` before `await` |
+| 2.3 Verify no post-yield writes that could race | ✅ | Only `ctx.liveMessageItemId = result.itemId` (kawa.ts:194) after await, guarded by generation check |
+| 3.1 `handleIncomingMessage` increments generation | ✅ | `kawa.ts:505` — `ctx.generation++` |
+| 3.2 `handleNew` increments generation on old context | ✅ | `commands.ts:63` — `oldCtx.generation++` |
+| 4.1 Capture `gen` before any await | ✅ | `kawa.ts:179` — `const gen = ctx.generation` |
+| 4.2 Generation check after each await | ✅ | 6 checks total at `kawa.ts:192`, `199`, `211`, `222`, `232`, `235` |
+| 4.3 Stale discard is silent (no throw/error/send) | ✅ | All stale checks are `return;` — no error, no message |
+| 5.1 Dedup guard in `startLiveMessage` | ✅ | `message-sender.ts:56-59` — checks STREAMING + non-null itemId, falls back to `updateLiveMessage` |
+| 5.2 `console.warn` on dedup | ✅ | `message-sender.ts:57` |
+| 6.1 E2e single-live-message test | ✅ | `live-message-dedup.test.ts` |
+| 6.2 E2e reset-during-streaming test | ✅ | `reset-during-streaming.test.ts` |
+
+**Spec Coverage: 7/7 requirements implemented** ✅
+
+| Requirement | Implemented | Evidence |
+|------------|-------------|----------|
+| Synchronous state transitions | ✅ | `kawa.ts:190`, `209`, `220` |
+| Generation-based staleness detection | ✅ | `session-manager.ts:23`, `kawa.ts:179/505`, `commands.ts:63` |
+| Stale event discard is silent | ✅ | All `return;` branches in `kawa.ts:192,199,211,222,232,235` |
+| Start live message (with dedup) | ✅ | `message-sender.ts:54-86` |
+| Update live message | ✅ | `message-sender.ts:35-46` |
+| Finalize live message | ✅ | `message-sender.ts:114-126` |
+| Single live message per contact | ✅ | Dedup guard + synchronous D1 fix + both e2e tests |
+
+---
+
+### Correctness
+
+**Requirement→Code Mapping:**
+
+1. **Synchronous state transitions** — `kawa.ts:190`: `ctx.liveMessageState = "STREAMING"` is set **before** the `await sender.startLiveMessage(ctx, ...)` call. The design's before/after example is exactly realized in the code. ✅
+
+2. **Generation-based staleness** — `kawa.ts:179` captures `gen` at entry, then each of the 6 post-await checkpoints does `if (ctx.generation !== gen) return;`. Both `handleIncomingMessage` (kawa.ts:505) and `handleNew` (commands.ts:63) increment the counter. ✅
+
+3. **Silent discard** — All 6 stale-detection points are bare `return;` statements. No throw, no error message, no side effects. ✅
+
+4. **Dedup in startLiveMessage** — `message-sender.ts:56-59`: when STREAMING + non-null itemId, calls `updateLiveMessage` and returns existing itemId. ✅
+
+5. **E2e tests** — Both tests exist and follow the D4 strategy: real agent events, real SimpleX, no mocking. ✅
+
+**Scenario Coverage:**
+
+| Scenario | Covered | Notes |
+|----------|---------|-------|
+| IDLE→STREAMING atomic | ✅ | Code + e2e single-live-message test |
+| Accumulated text sync | ✅ | `kawa.ts:209,220` + test covers tool use flow |
+| New prompt invalidates in-flight | ✅ | `kawa.ts:505` increment + post-await checks |
+| /new invalidates in-flight | ✅ | `commands.ts:63` + e2e reset-during-streaming test |
+| Generation no overflow | ✅ | JS number safe to 2^53 |
+| Stale startLiveMessage discarded | ✅ | `kawa.ts:192` — itemId NOT written on stale |
+| Stale updateLiveMessage discarded | ✅ | `kawa.ts:199,211,222` — early return |
+| Dedup when already streaming | ✅ | `message-sender.ts:56-59` |
+| Concurrent startLiveMessage calls | ⚠️ | See WARNING below |
+| E2e single message per response | ✅ | `live-message-dedup.test.ts` |
+| E2e /new during streaming | ✅ | `reset-during-streaming.test.ts` |
+
+---
+
+### Coherence
+
+**Design Decisions:**
+
+| Decision | Followed | Evidence |
+|----------|----------|----------|
+| D1: Synchronous transitions (not SerialQueue) | ✅ | No SerialQueue in codebase. State writes are before awaits. |
+| D2: Generation counter (not queue/flag/mutex) | ✅ | `generation: number` field, O(1) check, no cleanup needed |
+| D3: Dedup guard (defense in depth) | ✅ | `message-sender.ts:56-59` with `console.warn` |
+| D4: E2e over unit tests | ✅ | Both real e2e tests, no mock-based unit tests for these races |
+
+**No forbidden patterns:** No `SerialQueue`, async queue, mutex library, or shadow queue found. ✅
+
+---
+
+### Issues
+
+#### ⚠️ WARNING (Should fix)
+
+**1. Error handler in `wireSessionEvents` bypasses generation check**
+
+- **Location:** `kawa.ts:157-162`
+- **Detail:** The `.catch()` handler resets `ctx.liveMessageState`, `ctx.liveMessageItemId`, and `ctx.accumulatedText` without checking `ctx.generation`. If an in-flight event from a prior prompt throws during an await (e.g. `startLiveMessage` rejects), and the user has already sent a new message (incrementing generation), the error handler would overwrite the new prompt's state on the same `ContactContext` object.
+- **Scenario:** (1) Event A's `startLiveMessage` throws → (2) User sends new message during the throw, `generation++` → (3) Error handler fires, blanks `liveMessageItemId` and `accumulatedText` for the current session
+- **Recommendation:** Capture `const gen = ctx.generation` in the `wireSessionEvents` closure and check it before resetting state in the `.catch()` handler:
+  ```ts
+  handleAgentEvent(ctx, event, sender, formatter).catch((err) => {
+      console.error(`[kawa] Error handling agent event:`, err);
+      if (ctx.generation !== gen) return; // stale error, don't corrupt current state
+      ctx.liveMessageState = "IDLE";
+      ctx.liveMessageItemId = null;
+      ctx.accumulatedText = "";
+  });
+  ```
+  Note: for `/new`, the old context object is detached from the session manager, so the error handler's writes would be to an orphaned object (harmless). The risk is specific to `handleIncomingMessage` which reuses the same context.
+
+#### 💡 SUGGESTION (Nice to fix)
+
+**1. Redundant `ctx.accumulatedText = text` in `updateLiveMessage`**
+
+- **Location:** `message-sender.ts:36`
+- **Detail:** `updateLiveMessage` writes `ctx.accumulatedText = text`, but all callers in `handleAgentEvent` already set `ctx.accumulatedText` synchronously before calling the method (per D1). The redundant write is harmless but breaks the "caller owns synchronous state, method owns I/O" discipline that the design establishes.
+- **Recommendation:** Consider removing the `ctx.accumulatedText = text` line from `message-sender.ts:36` since the caller is responsible for synchronous state mutation. Alternatively, add a comment acknowledging the redundancy as intentional safety.
+
+**2. `agent_end` side effects execute before generation check**
+
+- **Location:** `kawa.ts:231-235`
+- **Detail:** In the `agent_end` case, `sendTextMessage` (line 231) or `finalizeLiveMessage` (line 234) are called before the generation check. If generation changes during the await, the I/O has already happened. The spec only requires that *state mutations* be prevented on stale events (which is satisfied), but a stale `agent_end` could potentially send a "(Agent finished with no output)" fallback message to a user who has already started a new conversation.
+- **Recommendation:** Low priority — this is a minor UX edge case (fallback message in new session) rather than a state corruption bug. If desired, add a generation check before the I/O calls:
+  ```ts
+  if (ctx.generation !== gen) return; // check BEFORE sending
+  await sender.sendTextMessage(ctx.contactId, "(Agent finished with no output)");
+  ```
+
+---
+
+### Final Assessment
+
+**No critical issues.** All 12 tasks are complete. All 7 spec requirements are implemented. All 4 design decisions are followed. `npm run check` passes cleanly.
+
+**1 warning** to consider: the error handler in `wireSessionEvents` (`kawa.ts:157-162`) mutates state without checking generation, which could corrupt the state of a session that received a new prompt while a prior event was in-flight. This is a narrow edge case but violates the design principle that cross-path state mutations should be generation-guarded.
+
+**2 suggestions** for polish (redundant state write, agent_end I/O ordering).
+
+**Overall: Ready for archive with the warning noted.** Fixing the error handler generation check would make the implementation fully airtight against the race conditions the change is designed to prevent.

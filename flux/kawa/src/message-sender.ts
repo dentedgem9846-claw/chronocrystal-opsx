@@ -48,12 +48,21 @@ export class MessageSender {
 
 	/**
 	 * Start a live message using sendChatCmd (allows liveMessage: true).
+	 * Includes a dedup guard: if the contact is already streaming with a valid itemId,
+	 * the existing message is updated instead of creating a duplicate.
 	 */
-	async startLiveMessage(contactId: number, text: string): Promise<{ itemId: number } | null> {
+	async startLiveMessage(ctx: ContactContext, text: string): Promise<{ itemId: number } | null> {
+		// Belt-and-suspenders dedup guard: if already streaming, update instead
+		if (ctx.liveMessageState === "STREAMING" && ctx.liveMessageItemId !== null) {
+			console.warn(`[msg] Already streaming for contact ${ctx.contactId}, updating instead`);
+			await this.updateLiveMessage(ctx, text);
+			return { itemId: ctx.liveMessageItemId };
+		}
+
 		try {
 			const response = await this.chatClient.sendChatCmd(
 				T.CC.APISendMessages.cmdString({
-					sendRef: { chatType: DIRECT_CHAT_TYPE, chatId: contactId },
+					sendRef: { chatType: DIRECT_CHAT_TYPE, chatId: ctx.contactId },
 					liveMessage: true,
 					composedMessages: [{ msgContent: { type: "text" as const, text }, mentions: {} }],
 				}),
@@ -71,7 +80,7 @@ export class MessageSender {
 			}
 			return null;
 		} catch (err) {
-			console.error(`[msg] Failed to start live message for contact ${contactId}:`, err);
+			console.error(`[msg] Failed to start live message for contact ${ctx.contactId}:`, err);
 			return null;
 		}
 	}
