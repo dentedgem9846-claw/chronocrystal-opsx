@@ -24,7 +24,12 @@ describe("live-message-throttle", () => {
 	//      throttling is FASTER overall because the SimpleX CLI processes
 	//      updates sequentially — a flood of tiny updates creates a backlog
 	//      that delays the final message.
+	//
+	// Run with KAWA_E2E_THROTTLE_MS=0 for unthrottled comparison.
+	const throttleMs = process.env.KAWA_E2E_THROTTLE_MS ?? "50";
+
 	it("throttled updates reduce command count and deliver messages faster", async () => {
+		console.log(`[test] throttle interval: ${throttleMs}ms`);
 		aliceHistory.length = 0;
 		updateCounts.clear();
 

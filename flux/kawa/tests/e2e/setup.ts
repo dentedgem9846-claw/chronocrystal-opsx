@@ -161,6 +161,10 @@ export async function setupShared(): Promise<void> {
 	cleanup(ALICE_SIMPLEX_DIR);
 
 	// 2. Start Kawa — black box: env vars only, no wrapper script
+	// KAWA_E2E_THROTTLE_MS controls the throttle interval (default 50ms).
+	// Set to 0 for unthrottled comparison runs.
+	const throttleMs = process.env.KAWA_E2E_THROTTLE_MS ?? "50";
+	console.log(`[e2e] Throttle interval: ${throttleMs}ms`);
 	const cwd = new URL("../..", import.meta.url).pathname;
 	kawaProc = spawn("node", ["dist/kawa.js"], {
 		cwd,
@@ -170,6 +174,7 @@ export async function setupShared(): Promise<void> {
 			KAWA_SIMPLEX_PORT: String(KAWA_SIMPLEX_PORT),
 			KAWA_ADDRESS_PORT: String(KAWA_ADDRESS_PORT),
 			KAWA_SIMPLEX_DATA_DIR: KAWA_SIMPLEX_DIR,
+			KAWA_LIVE_MSG_UPDATE_INTERVAL_MS: throttleMs,
 		},
 	});
 	kawaProc.stdout?.on("data", (d: Buffer) => {
