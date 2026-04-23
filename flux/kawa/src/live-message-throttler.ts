@@ -40,6 +40,7 @@ export class LiveMessageThrottler {
 				.updateLiveMessage(ctx, textToSend)
 				.then(() => {
 					if (ctx.generation !== gen) return;
+					if (ctx.liveMessageItemId === null) return;
 					ctx.lastSentText = textToSend;
 				})
 				.catch((err) => {
