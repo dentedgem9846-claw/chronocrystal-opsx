@@ -167,6 +167,8 @@ function wireSessionEvents(
 			ctx.liveMessageState = "IDLE";
 			ctx.liveMessageItemId = null;
 			ctx.accumulatedText = "";
+			ctx.lastSentText = "";
+			throttler.cancel(ctx);
 		});
 	};
 

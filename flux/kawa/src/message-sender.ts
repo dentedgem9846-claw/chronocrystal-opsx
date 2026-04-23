@@ -120,6 +120,7 @@ export class MessageSender {
 			ctx.liveMessageState = "IDLE";
 			ctx.liveMessageItemId = null;
 			ctx.accumulatedText = "";
+			ctx.lastSentText = "";
 		}
 	}
 }
