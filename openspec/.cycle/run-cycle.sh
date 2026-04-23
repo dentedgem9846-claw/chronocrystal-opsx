@@ -20,12 +20,29 @@ ORIGINAL=$(head -3 "$PROJECT_DIR/openspec/changes/$CHANGE_NAME/proposal.md" 2>/d
 rm -rf "$CYCLE_DIR"/*
 mkdir -p "$CYCLE_DIR"
 
-# Helper: git commit
+# Helper: git commit — stage only known change artifacts, never git add -A
 commit() {
   local phase="$1"
   local iteration="$2"
   cd "$PROJECT_DIR"
-  git add -A
+
+  # Stage only files that cycle agents are expected to touch
+  # Code changes
+  git add flux/kawa/src/ flux/kawa/tests/ 2>/dev/null || true
+  # Change artifacts (specs, tasks, design, proposal, issues)
+  git add "openspec/changes/$CHANGE_NAME/" 2>/dev/null || true
+  # AGENTS.md if modified
+  git diff --name-only HEAD -- AGENTS.md | head -1 | xargs -r git add 2>/dev/null || true
+
+  # Verify what's staged — abort if nothing intentional
+  local staged
+  staged=$(git diff --cached --name-only)
+  if [ -z "$staged" ]; then
+    echo "(commit: nothing staged, skipping)"
+    return
+  fi
+
+  echo "(commit: staging: $staged)"
   git commit -m "opsx: $phase $iteration for $CHANGE_NAME" --allow-empty 2>/dev/null || true
 }
 

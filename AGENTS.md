@@ -98,7 +98,25 @@ aliceClient = null;
 
 Linters flag `any` for a reason. Fix the type, don't suppress the warning.
 
-## 9. E2E tests treat the system under test as a black box
+## 9. Stage files explicitly, never `git add -A`
+
+`git add -A` (or `git add --all` or `git add .`) stages everything — including stray temp files, cycle artifacts, editor leftovers, and anything else lying in the working tree. These unintended files enter version history permanently and can't be removed without a force push.
+
+Always stage files by name so every change is intentional and reviewable:
+
+```bash
+# Wrong
+git add -A
+git add .
+git add --all
+
+# Right
+git add src/live-message-throttler.ts src/session-manager.ts AGENTS.md
+```
+
+**Check**: Before every commit, run `git diff --cached --stat` and read the file list. If a file is there that you didn't intend to change, unstage it (`git reset HEAD <file>`) and re-evaluate.
+
+## 10. E2E tests treat the system under test as a black box
 
 Tests configure Kawa through environment variables and its HTTP address API only. No wrapper scripts, no patching internal binaries, no reaching into Kawa's subprocess management. If the test needs to configure Kawa's simplex-chat data directory or bot display name, that's Kawa's config surface (`KAWA_SIMPLEX_DATA_DIR`, `KAWA_BOT_DISPLAY_NAME`) — add it to `KawaConfig`, not a shell script wrapper.
 
