@@ -135,14 +135,11 @@ describe("convertMarkdownToSimplex", () => {
 
 	// SimpleX-native passthrough
 	describe("SimpleX-native passthrough", () => {
-		it("preserves already-correct SimpleX bold *text*", () => {
-			// *text* that was already SimpleX bold should stay
-			// But our converter treats all single * as italic, so this becomes _text_
-			// This is expected: if the LLM outputs *text* intending SimpleX bold,
-			// but our regex can't distinguish intent. The SYSTEM.md tells the LLM
-			// to use SimpleX format, and the converter catches anything missed.
-			// Note: This test documents the current behavior. If we want true
-			// passthrough, we'd need a more sophisticated approach.
+		it("treats ambiguous single-asterisk text as italic (converts to _text_)", () => {
+			// Single *text* is indistinguishable from standard markdown italic,
+			// so it is converted to _text_. The SYSTEM.md prompt tells the LLM
+			// to use SimpleX *bold* format, and the converter catches anything missed.
+			expect(convertMarkdownToSimplex("*text*")).toBe("_text_");
 		});
 
 		it("preserves already-correct SimpleX italic _text_", () => {

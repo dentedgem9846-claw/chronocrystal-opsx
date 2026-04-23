@@ -91,6 +91,7 @@ export class SessionManager {
 	 */
 	async closeAll(): Promise<void> {
 		for (const ctx of this.byContactId.values()) {
+			this.throttler?.cancel(ctx);
 			ctx.unsubscribe?.();
 		}
 		this.byContactId.clear();

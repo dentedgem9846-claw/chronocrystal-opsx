@@ -39,12 +39,7 @@ export class MessageSender {
 			console.warn(`[msg] No live message item ID for contact ${ctx.contactId}, skipping update`);
 			return;
 		}
-		await this.updateLiveMessageCmd(
-			ctx.contactId,
-			ctx.liveMessageItemId,
-			ctx.accumulatedText,
-			true,
-		);
+		await this.updateLiveMessageCmd(ctx.contactId, ctx.liveMessageItemId, text, true);
 	}
 
 	/**

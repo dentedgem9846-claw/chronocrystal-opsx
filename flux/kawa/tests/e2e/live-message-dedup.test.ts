@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { resetSession, send, waitForMessage } from "./helpers.js";
-import { aliceHistory, setupShared, teardownShared } from "./setup.js";
+import { aliceHistory, kawaContactId, setupShared, teardownShared } from "./setup.js";
 
 describe("live-message-dedup", () => {
 	beforeAll(async () => {
@@ -24,15 +24,26 @@ describe("live-message-dedup", () => {
 		await send("Run `ls` and then read the file package.json");
 
 		// Wait for the agent to finish — look for a response that contains
-		// typical tool-use output markers or substantial content
-		const reply = await waitForMessage(
-			(t) =>
-				t.includes("package.json") ||
-				t.includes("dependencies") ||
-				t.includes("(Agent finished with no output)") ||
-				t.length > 50,
-			180000,
-		);
+		// typical tool-use output markers or substantial content.
+		// Use a non-destructive poll so aliceHistory retains entries for
+		// the itemId assertion below.
+		const deadline = Date.now() + 180000;
+		let reply = "";
+		while (Date.now() < deadline) {
+			const entry = aliceHistory.find(
+				(m) =>
+					m.contactId === kawaContactId &&
+					(m.text.includes("package.json") ||
+						m.text.includes("dependencies") ||
+						m.text.includes("(Agent finished with no output)") ||
+						m.text.length > 50),
+			);
+			if (entry) {
+				reply = entry.text;
+				break;
+			}
+			await new Promise((r) => setTimeout(r, 300));
+		}
 
 		expect(reply).toBeTruthy();
 

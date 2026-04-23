@@ -49,7 +49,7 @@ export class CommandHandler {
 
 	private async handleHelp(contactId: number): Promise<void> {
 		const helpText = [
-			"🔧 **Kawa Commands**",
+			"🔧 *Kawa Commands*",
 			"/help — Show this help message",
 			"/new — Start a fresh session (aborts current if streaming)",
 			"/compact — Compact the current conversation context",
@@ -121,7 +121,7 @@ export class CommandHandler {
 
 		const state = ctx.session.state;
 		const lines = [
-			"📊 **Session Status**",
+			"📊 *Session Status*",
 			`Model: ${state.model?.id ?? "unknown"}`,
 			`Streaming: ${state.isStreaming ? "yes" : "no"}`,
 			`Messages in context: ${state.messages?.length ?? 0}`,
