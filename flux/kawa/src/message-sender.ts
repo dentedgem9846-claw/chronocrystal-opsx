@@ -33,7 +33,8 @@ export class MessageSender {
 	 * The IDLE → STREAMING transition is handled by startLiveMessage.
 	 */
 	async updateLiveMessage(ctx: ContactContext, text: string): Promise<void> {
-		ctx.accumulatedText = text;
+		// Caller owns synchronous state mutation (per D1: write-before-yield).
+		// accumulatedText is already set by the caller before this method is called.
 		if (ctx.liveMessageItemId === null) {
 			console.warn(`[msg] No live message item ID for contact ${ctx.contactId}, skipping update`);
 			return;
