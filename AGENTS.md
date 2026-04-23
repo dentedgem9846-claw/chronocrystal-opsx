@@ -123,3 +123,47 @@ Tests configure Kawa through environment variables and its HTTP address API only
 Alice (the test client) is NOT the system under test — wrapper scripts for Alice are fine.
 
 **Check**: If setup.ts creates a wrapper script that wraps Kawa's binary, the test is white-box. Move that config into KawaConfig as an env var.
+
+## 11. Don't assume — ask, surface ambiguity, push back
+
+When a task is ambiguous, don't pick an interpretation silently and run with it. State your assumptions. If two readings exist, present both. If a simpler approach solves the problem, say so. If something is unclear, stop and ask.
+
+LLMs silently pick the more complicated interpretation and implement 200 lines when 50 would do. Naming what's unclear prevents rewrites.
+
+**Check**: Before implementing, list what the task could mean. If you picked the complex one, justify why. If you can't, ask.
+
+## 12. Minimum code that solves the problem — nothing speculative
+
+No features beyond what was asked. No abstractions for single-use code. No "flexibility" or "configurability" that wasn't requested. No error handling for impossible scenarios. If 200 lines could be 50, rewrite it.
+
+Would a senior engineer say this is overcomplicated? If yes, simplify.
+
+**Check**: Read your diff. Every added line should trace directly to the user's request. If it doesn't, remove it. Mention unrelated dead code you notice — don't delete it.
+
+## 13. Touch only what you must — clean up only your own mess
+
+Don't "improve" adjacent code, comments, or formatting. Don't refactor things that aren't broken. Match existing style, even if you'd do it differently. When your changes create orphans (unused imports, variables, functions), remove only the ones YOUR changes made unused — not pre-existing dead code.
+
+**Check**: Every changed line in your diff should trace directly to what was requested. If a line doesn't, revert it.
+
+## 14. Define success criteria — loop until verified
+
+Transform imperative tasks into verifiable goals:
+
+| Instead of... | Transform to... |
+|---|---|
+| "Add validation" | "Write tests for invalid inputs, then make them pass" |
+| "Fix the bug" | "Write a test that reproduces it, then make it pass" |
+| "Refactor X" | "Ensure tests pass before and after" |
+
+For multi-step tasks, state the plan with verification points:
+
+```
+1. [Step] → verify: [check]
+2. [Step] → verify: [check]
+3. [Step] → verify: [check]
+```
+
+Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
+
+**Check**: Before starting a task, write down what "done" looks like as a testable condition. After implementing, verify each condition.
