@@ -16,7 +16,7 @@
 - [x] 1.8 Add `throttleTimer: ReturnType<typeof setTimeout> | null` field to `ContactContext` interface in `src/session-manager.ts`
 - [x] 1.9 Initialize `throttleTimer: null` in `createSessionForContact` and any session creation/reset paths
 - [x] 1.10 Clear throttle timer in `removeByContactId` — call throttler's `cancel()` for the removed contact
-- [x] 1.11 Clear throttle timer in `handleIncomingMessage` when resetting context (new prompt) — cancel before incrementing generation
+- [x] 1.11 Clear throttle timer in `handleIncomingMessage` when resetting context (new prompt) — cancel around the generation increment (code increments then cancels; both execute synchronously before any await due to JS single-threading)
 - [x] 1.12 Add `lastSentText: string` field to `ContactContext` interface (for no-op flush optimization)
 - [x] 1.13 Initialize `lastSentText: ""` in `createSessionForContact` and any session creation/reset paths
 

@@ -140,7 +140,7 @@ The `EventFormatter` is already responsible for formatting agent events. Adding 
 
 ### Decision 7: System prompt via `.pi/SYSTEM.md` to teach the LLM SimpleX dialect
 
-**Choice:** Create a `SYSTEM.md` file in the `.pi/` directory that tells the LLM to use SimpleX's markdown dialect directly. Pi-coding-agent auto-discovers this file via `DefaultResourceLoader.discoverSystemPromptFile()`, which checks `<agentDir>/.pi/SYSTEM.md`.
+**Choice:** Create a `SYSTEM.md` file in the `.pi/` directory that tells the LLM to use SimpleX's markdown dialect directly. Pi-coding-agent auto-discovers this file via `DefaultResourceLoader.discoverSystemPromptFile()`, which checks `<agentDir>/SYSTEM.md`.
 
 **Rationale:** Two layers of defense: the system prompt teaches the LLM to produce correct formatting natively (`*bold*` instead of `**bold**`), and the `EventFormatter` conversion catches anything the LLM still outputs in standard markdown. This reduces the conversion workload and provides better results when both layers work together.
 
