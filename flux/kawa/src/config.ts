@@ -20,6 +20,8 @@ export interface KawaConfig {
 	addressApiPort: number;
 	/** Tool output truncation line limit */
 	toolTruncationLines: number;
+	/** Throttle interval for live message updates (ms). Reduces SimpleX command volume by batching updates. */
+	liveMessageUpdateIntervalMs: number;
 	/** Backoff settings for SimpleX CLI restart */
 	restartBackoff: {
 		initialMs: number;
@@ -38,6 +40,7 @@ export const defaultConfig: KawaConfig = {
 	maxSessions: 3,
 	addressApiPort: 8080,
 	toolTruncationLines: 5,
+	liveMessageUpdateIntervalMs: 200,
 	restartBackoff: {
 		initialMs: 1000,
 		maxMs: 30000,

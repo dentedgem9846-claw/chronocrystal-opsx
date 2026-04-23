@@ -7,7 +7,7 @@ models:
   applytest: kimi-k2.6:cloud
   explore: gemma4:31b-cloud
 
-kawa_core_model: gemma4:31b-cloud
+kawa_core_model: kimi-k2.6:cloud
 
 agents:
   verify: verify-glm

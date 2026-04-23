@@ -25,6 +25,7 @@ import { ChatClient } from "simplex-chat";
 import { CommandHandler } from "./commands.js";
 import { type KawaConfig, defaultConfig } from "./config.js";
 import { EventFormatter, extractTextFromContent } from "./event-formatter.js";
+import { LiveMessageThrottler } from "./live-message-throttler.js";
 import { MessageSender } from "./message-sender.js";
 import { type ContactContext, SessionManager } from "./session-manager.js";
 import { SimpleXProcess } from "./simplex-process.js";
@@ -130,6 +131,7 @@ async function createSessionForContact(
 			liveMessageState: "IDLE",
 			unsubscribe: null,
 			generation: 0,
+			throttleTimer: null,
 		};
 
 		const added = sessions.add(ctx);
@@ -152,10 +154,11 @@ function wireSessionEvents(
 	ctx: ContactContext,
 	sender: MessageSender,
 	formatter: EventFormatter,
+	throttler: LiveMessageThrottler,
 ): void {
 	const listener = (event: AgentSessionEvent) => {
 		const gen = ctx.generation;
-		handleAgentEvent(ctx, event, sender, formatter).catch((err) => {
+		handleAgentEvent(ctx, event, sender, formatter, throttler).catch((err) => {
 			console.error(`[kawa] Error handling agent event for contact ${ctx.contactId}:`, err);
 			// Only reset state if this error belongs to the current generation
 			// Otherwise a stale error from a prior prompt could corrupt the new session's state
@@ -177,6 +180,7 @@ async function handleAgentEvent(
 	event: AgentSessionEvent,
 	sender: MessageSender,
 	formatter: EventFormatter,
+	throttler: LiveMessageThrottler,
 ): Promise<void> {
 	// Capture generation before any await to detect stale events after cross-path resets
 	const gen = ctx.generation;
@@ -197,9 +201,8 @@ async function handleAgentEvent(
 						ctx.liveMessageItemId = result.itemId;
 					}
 				} else {
-					// STREAMING: update existing live message
-					await sender.updateLiveMessage(ctx, ctx.accumulatedText);
-					if (ctx.generation !== gen) return; // stale event, discard silently
+					// STREAMING: throttle the update
+					throttler.scheduleUpdate(ctx);
 				}
 			}
 			break;
@@ -208,6 +211,9 @@ async function handleAgentEvent(
 		case "tool_execution_start": {
 			const append = formatter.formatEventAppend(event);
 			if (append) {
+				// Flush any throttled update before appending tool marker
+				await throttler.flush(ctx);
+				if (ctx.generation !== gen) return; // stale event, discard silently
 				// Append synchronously BEFORE the await to prevent race conditions
 				ctx.accumulatedText += append;
 				await sender.updateLiveMessage(ctx, ctx.accumulatedText);
@@ -219,6 +225,9 @@ async function handleAgentEvent(
 		case "tool_execution_end": {
 			const append = formatter.formatEventAppend(event);
 			if (append) {
+				// Flush any throttled update before appending tool marker
+				await throttler.flush(ctx);
+				if (ctx.generation !== gen) return; // stale event, discard silently
 				// Append synchronously BEFORE the await to prevent race conditions
 				ctx.accumulatedText += append;
 				await sender.updateLiveMessage(ctx, ctx.accumulatedText);
@@ -229,6 +238,9 @@ async function handleAgentEvent(
 
 		case "agent_end": {
 			// Check generation BEFORE side effects to prevent stale I/O
+			if (ctx.generation !== gen) return; // stale event, discard silently
+			// Flush any throttled update before finalizing
+			await throttler.flush(ctx);
 			if (ctx.generation !== gen) return; // stale event, discard silently
 			// Finalize the live message
 			if (ctx.liveMessageState === "IDLE" && !ctx.accumulatedText) {
@@ -268,6 +280,9 @@ async function main() {
 		toolTruncationLines: Number(
 			process.env.KAWA_TOOL_TRUNCATION_LINES ?? defaultConfig.toolTruncationLines,
 		),
+		liveMessageUpdateIntervalMs: Number(
+			process.env.KAWA_LIVE_MSG_UPDATE_INTERVAL_MS ?? defaultConfig.liveMessageUpdateIntervalMs,
+		),
 	};
 
 	console.log("[kawa] Starting Kawa agent...");
@@ -289,6 +304,7 @@ async function main() {
 		_chatClient: ChatClient,
 		_messageSender: MessageSender,
 		_commandHandler: CommandHandler,
+		_throttler: LiveMessageThrottler,
 	): Promise<void> {
 		// Task 4.1-4.3: Bot profile setup
 		await setupBotProfile(_chatClient, config);
@@ -296,7 +312,15 @@ async function main() {
 		console.log("[kawa] Kawa is online! Waiting for messages...");
 
 		// Task 3.3: Main event loop
-		await processEvents(_chatClient, sessions, _messageSender, _commandHandler, formatter, config);
+		await processEvents(
+			_chatClient,
+			sessions,
+			_messageSender,
+			_commandHandler,
+			formatter,
+			_throttler,
+			config,
+		);
 	}
 
 	// Task 2.1-2.3: Start SimpleX CLI process
@@ -308,12 +332,13 @@ async function main() {
 				const connectedClient = await ChatClient.create(`ws://localhost:${config.simplexPort}`);
 				activeChatClient = connectedClient;
 				const sender = new MessageSender(connectedClient, config);
+				const throttler = new LiveMessageThrottler(sender, config.liveMessageUpdateIntervalMs);
 				const cmdHandler = new CommandHandler(sessions, sender, config, (contactId) =>
-					createAndWireSessionForHandler(contactId, sessions, sender, formatter),
+					createAndWireSessionForHandler(contactId, sessions, sender, formatter, throttler),
 				);
 				simplexProcess.resetBackoff();
 
-				await runSessionLoop(connectedClient, sender, cmdHandler);
+				await runSessionLoop(connectedClient, sender, cmdHandler, throttler);
 			} catch (err) {
 				console.error("[kawa] Failed to connect to SimpleX:", err);
 			}
@@ -387,6 +412,7 @@ async function processEvents(
 	sender: MessageSender,
 	commandHandler: CommandHandler,
 	formatter: EventFormatter,
+	throttler: LiveMessageThrottler,
 	config: KawaConfig,
 ): Promise<void> {
 	try {
@@ -398,6 +424,7 @@ async function processEvents(
 				sender,
 				commandHandler,
 				formatter,
+				throttler,
 				config,
 			);
 		}
@@ -416,6 +443,7 @@ async function handleSimpleXEvent(
 	sender: MessageSender,
 	commandHandler: CommandHandler,
 	formatter: EventFormatter,
+	throttler: LiveMessageThrottler,
 	config: KawaConfig,
 ): Promise<void> {
 	switch (event.type) {
@@ -424,7 +452,13 @@ async function handleSimpleXEvent(
 			const contactId = event.contact.contactId;
 			console.log(`[kawa] Contact connected: ${contactId}`);
 
-			const ctx = await createAndWireSessionForHandler(contactId, sessions, sender, formatter);
+			const ctx = await createAndWireSessionForHandler(
+				contactId,
+				sessions,
+				sender,
+				formatter,
+				throttler,
+			);
 			if (ctx) {
 				await sender.sendTextMessage(
 					contactId,
@@ -457,7 +491,15 @@ async function handleSimpleXEvent(
 				const text = extractTextFromContent(aChatItem.chatItem.content);
 				if (!text) continue;
 
-				await handleIncomingMessage(contactId, text, sessions, sender, commandHandler, formatter);
+				await handleIncomingMessage(
+					contactId,
+					text,
+					sessions,
+					sender,
+					commandHandler,
+					formatter,
+					throttler,
+				);
 			}
 			break;
 		}
@@ -472,10 +514,11 @@ async function createAndWireSessionForHandler(
 	sessions: SessionManager,
 	sender: MessageSender,
 	formatter: EventFormatter,
+	throttler: LiveMessageThrottler,
 ): Promise<ContactContext | undefined> {
 	const ctx = await createSessionForContact(contactId, sessions);
 	if (!ctx) return undefined;
-	wireSessionEvents(ctx, sender, formatter);
+	wireSessionEvents(ctx, sender, formatter, throttler);
 	return ctx;
 }
 
@@ -489,6 +532,7 @@ async function handleIncomingMessage(
 	sender: MessageSender,
 	commandHandler: CommandHandler,
 	formatter: EventFormatter,
+	throttler: LiveMessageThrottler,
 ): Promise<void> {
 	// Task 8.5: Check for slash commands first
 	const isCommand = await commandHandler.handle(contactId, text);
@@ -499,7 +543,7 @@ async function handleIncomingMessage(
 
 	// Task 5.5: Auto-create session for unknown contacts
 	if (!ctx) {
-		ctx = await createAndWireSessionForHandler(contactId, sessions, sender, formatter);
+		ctx = await createAndWireSessionForHandler(contactId, sessions, sender, formatter, throttler);
 		if (!ctx) {
 			await sender.sendTextMessage(contactId, "❌ Kawa is at capacity. Try again later.");
 			return;
@@ -517,6 +561,10 @@ async function handleIncomingMessage(
 			ctx.liveMessageState = "IDLE";
 			ctx.accumulatedText = "";
 			ctx.liveMessageItemId = null;
+			if (ctx.throttleTimer !== null) {
+				clearTimeout(ctx.throttleTimer);
+				ctx.throttleTimer = null;
+			}
 			await ctx.session.prompt(text);
 		}
 	} catch (err) {

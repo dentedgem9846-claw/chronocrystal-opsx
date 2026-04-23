@@ -59,6 +59,12 @@ export class CommandHandler {
 	private async handleNew(contactId: number): Promise<void> {
 		const oldCtx = this.sessionManager.getByContactId(contactId);
 		if (oldCtx) {
+			// Cancel any pending throttle timer
+			if (oldCtx.throttleTimer !== null) {
+				clearTimeout(oldCtx.throttleTimer);
+				oldCtx.throttleTimer = null;
+			}
+
 			// Increment generation to invalidate any in-flight agent events
 			oldCtx.generation++;
 

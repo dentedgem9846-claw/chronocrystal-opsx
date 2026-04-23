@@ -1,5 +1,6 @@
 import type { AgentSessionEvent } from "@mariozechner/pi-coding-agent";
 import type { KawaConfig } from "./config.js";
+import { convertMarkdownToSimplex } from "./markdown-to-simplex.js";
 import type { ContactContext } from "./session-manager.js";
 
 /**
@@ -103,7 +104,7 @@ export class EventFormatter {
 
 		// Handle string content directly
 		if (typeof content === "string" && content) {
-			return content;
+			return convertMarkdownToSimplex(content);
 		}
 
 		// Handle array of content blocks
@@ -118,7 +119,7 @@ export class EventFormatter {
 				}
 			}
 			const text = textParts.join("");
-			if (text) return text;
+			if (text) return convertMarkdownToSimplex(text);
 			return thinkingParts.join("");
 		}
 

@@ -21,6 +21,8 @@ export interface ContactContext {
 	unsubscribe: (() => void) | null;
 	/** Generation counter for cross-path staleness detection. Incremented on new prompt or /new. */
 	generation: number;
+	/** Throttle timer for batching live message updates (set by LiveMessageThrottler) */
+	throttleTimer: ReturnType<typeof setTimeout> | null;
 }
 
 /**
@@ -55,6 +57,10 @@ export class SessionManager {
 	removeByContactId(contactId: number): ContactContext | undefined {
 		const ctx = this.byContactId.get(contactId);
 		if (ctx) {
+			if (ctx.throttleTimer !== null) {
+				clearTimeout(ctx.throttleTimer);
+				ctx.throttleTimer = null;
+			}
 			this.byContactId.delete(contactId);
 			ctx.unsubscribe?.();
 		}
