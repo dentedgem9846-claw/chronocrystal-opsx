@@ -26,11 +26,11 @@ The LiveMessageThrottler SHALL batch `updateLiveMessage` calls into timed interv
 - **AND** the user SHALL see the complete final message without throttle delay
 
 ### Requirement: Configurable throttle interval
-The throttle interval SHALL be configurable via the `KAWA_LIVE_MSG_UPDATE_INTERVAL_MS` environment variable, with a default of 200ms.
+The throttle interval SHALL be configurable via the `KAWA_LIVE_MSG_UPDATE_INTERVAL_MS` environment variable, with a default of 50ms.
 
 #### Scenario: Default interval
 - **WHEN** `KAWA_LIVE_MSG_UPDATE_INTERVAL_MS` is not set
-- **THEN** the throttle interval SHALL be 200ms
+- **THEN** the throttle interval SHALL be 50ms
 
 #### Scenario: Custom interval
 - **WHEN** `KAWA_LIVE_MSG_UPDATE_INTERVAL_MS` is set to `500`

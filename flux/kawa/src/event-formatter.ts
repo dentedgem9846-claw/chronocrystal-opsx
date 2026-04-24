@@ -130,14 +130,26 @@ export class EventFormatter {
 /**
  * Extract text from a SimpleX chat item content.
  * Used to parse incoming messages from SimpleX contacts.
+ * Returns text for all content types that carry text (including captions on images/videos/files).
+ * Returns undefined only for content types with no meaningful text.
  */
 export function extractTextFromContent(content: {
 	type: string;
 	msgContent?: { type: string; text?: string };
 }): string | undefined {
 	if (content.type === "rcvMsgContent" && content.msgContent) {
-		if (content.msgContent.type === "text" && content.msgContent.text) {
-			return content.msgContent.text;
+		const msgContent = content.msgContent;
+		switch (msgContent.type) {
+			case "text":
+				return msgContent.text || undefined;
+			case "image":
+				return msgContent.text || undefined;
+			case "video":
+				return msgContent.text || undefined;
+			case "file":
+				return msgContent.text || undefined;
+			case "link":
+				return msgContent.text || undefined;
 		}
 	}
 	return undefined;

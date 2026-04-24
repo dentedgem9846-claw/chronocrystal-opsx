@@ -50,6 +50,14 @@ export interface KawaConfig {
 		maxMs: number;
 		multiplier: number;
 	};
+	/** Directory for storing received files (images, videos, generic files). Default: <cwd>/kawa-files/ */
+	filesDir: string;
+	/** Path to the ffmpeg binary for video frame extraction. Default: "ffmpeg" (looked up via PATH) */
+	ffmpegBin: string;
+	/** Maximum dimension (in pixels) for resizing received images. Default: 2048 */
+	imageMaxDimension: number;
+	/** Timeout in ms to wait for file transfer before prompting with text only. Default: 30000 */
+	fileBufferTimeoutMs: number;
 }
 
 export const defaultConfig: KawaConfig = {
@@ -68,4 +76,8 @@ export const defaultConfig: KawaConfig = {
 		maxMs: 30000,
 		multiplier: 2,
 	},
+	filesDir: "", // Will be set to <cwd>/kawa-files/ in main()
+	ffmpegBin: "ffmpeg",
+	imageMaxDimension: 2048,
+	fileBufferTimeoutMs: 30000,
 };

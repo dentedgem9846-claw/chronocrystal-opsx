@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+import { basename, resolve } from "node:path";
 import * as T from "@simplex-chat/types";
 import { ChatType } from "@simplex-chat/types/dist/types.js";
 import type { ChatClient } from "simplex-chat";
@@ -101,6 +103,82 @@ export class MessageSender {
 			);
 		} catch (err) {
 			console.error(`[msg] Failed to update live message for contact ${contactId}:`, err);
+		}
+	}
+
+	/**
+	 * Send an image file to a contact as an inline SimpleX image.
+	 *
+	 * @param contactId - The contact to send the image to
+	 * @param filePath - Path to the image file on disk
+	 * @param caption - Optional caption for the image (defaults to file name)
+	 */
+	async sendImageMessage(contactId: number, filePath: string, caption?: string): Promise<void> {
+		this.validateFilePath(filePath);
+
+		try {
+			const imageBuffer = await readFile(filePath);
+			const base64 = imageBuffer.toString("base64");
+			const text = caption ?? basename(filePath);
+
+			await this.chatClient.apiSendMessages(DIRECT_CHAT_TYPE, contactId, [
+				{
+					msgContent: { type: "image" as const, text, image: base64 },
+					mentions: {},
+				},
+			]);
+			console.log(`[msg] Sent image to contact ${contactId}: ${filePath}`);
+		} catch (err) {
+			console.error(`[msg] Failed to send image to contact ${contactId}:`, err);
+			throw err;
+		}
+	}
+
+	/**
+	 * Send a file to a contact as a SimpleX file attachment.
+	 *
+	 * @param contactId - The contact to send the file to
+	 * @param filePath - Path to the file on disk
+	 * @param description - Optional description for the file (defaults to file name)
+	 */
+	async sendFileMessage(contactId: number, filePath: string, description?: string): Promise<void> {
+		this.validateFilePath(filePath);
+
+		try {
+			const text = description ?? basename(filePath);
+
+			await this.chatClient.apiSendMessages(DIRECT_CHAT_TYPE, contactId, [
+				{
+					fileSource: { filePath },
+					msgContent: { type: "file" as const, text },
+					mentions: {},
+				},
+			]);
+			console.log(`[msg] Sent file to contact ${contactId}: ${filePath}`);
+		} catch (err) {
+			console.error(`[msg] Failed to send file to contact ${contactId}:`, err);
+			throw err;
+		}
+	}
+
+	/**
+	 * Validate that a file path is within cwd or KAWA_FILES_DIR.
+	 * Prevents path traversal attacks from the agent.
+	 */
+	private validateFilePath(filePath: string): void {
+		const resolved = resolve(filePath);
+		const cwd = resolve(this.config.cwd);
+		const filesDir = resolve(this.config.filesDir);
+
+		if (
+			!resolved.startsWith(`${cwd}/`) &&
+			!resolved.startsWith(`${filesDir}/`) &&
+			resolved !== cwd &&
+			resolved !== filesDir
+		) {
+			throw new Error(
+				`Path must be within the working directory or KAWA_FILES_DIR. Got: ${resolved}`,
+			);
 		}
 	}
 

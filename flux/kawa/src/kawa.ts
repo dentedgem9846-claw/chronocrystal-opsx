@@ -14,17 +14,21 @@
  */
 
 import { execSync } from "node:child_process";
+import { mkdirSync } from "node:fs";
 import { createServer } from "node:http";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import type { ImageContent } from "@mariozechner/pi-ai";
 import { type AgentSessionEvent, createAgentSession } from "@mariozechner/pi-coding-agent";
 import type * as T from "@simplex-chat/types";
 // ChatPeerType is a CJS enum that needs a value import for runtime use
 import { ChatPeerType } from "@simplex-chat/types/dist/types.js";
 import { ChatClient } from "simplex-chat";
+import { createSendFileTool, createSendImageTool } from "./agent-tools.js";
 import { CommandHandler } from "./commands.js";
 import { type KawaConfig, defaultConfig, parsePositiveInt } from "./config.js";
 import { EventFormatter, extractTextFromContent } from "./event-formatter.js";
+import { FileReceiver } from "./file-receiver.js";
 import { LiveMessageThrottler } from "./live-message-throttler.js";
 import { MessageSender } from "./message-sender.js";
 import { type ContactContext, SessionManager } from "./session-manager.js";
@@ -110,17 +114,49 @@ function detectSimplexBin(config: KawaConfig): string {
 	}
 }
 
+/** Module-level flag indicating whether ffmpeg is available for video frame extraction. */
+export let ffmpegAvailable = false;
+
+/**
+ * Detect if ffmpeg is available for video frame extraction.
+ * Sets the module-level `ffmpegAvailable` flag. Logs a warning if not found.
+ */
+function detectFfmpegBin(config: KawaConfig): void {
+	try {
+		execSync(`${config.ffmpegBin} -version`, { stdio: "pipe" });
+		ffmpegAvailable = true;
+		console.log(`[kawa] ffmpeg found at: ${config.ffmpegBin}`);
+	} catch {
+		ffmpegAvailable = false;
+		console.warn(
+			`⚠️ ffmpeg not found at "${config.ffmpegBin}". Video frame extraction will be disabled.\n   Install ffmpeg or set the KAWA_FFMPEG_BIN environment variable.`,
+		);
+	}
+}
+
 /**
  * Create an AgentSession for a contact using Kawa's .pi config.
  */
 async function createSessionForContact(
 	contactId: number,
 	sessions: SessionManager,
+	sender: MessageSender,
+	config: KawaConfig,
 ): Promise<ContactContext | undefined> {
+	const sendImageTool = createSendImageTool(sender, config, () => {
+		const ctx = sessions.getByContactId(contactId);
+		return ctx?.contactId;
+	});
+	const sendFileTool = createSendFileTool(sender, config, () => {
+		const ctx = sessions.getByContactId(contactId);
+		return ctx?.contactId;
+	});
+
 	try {
 		const { session } = await createAgentSession({
 			agentDir: AGENT_DIR,
 			cwd: process.cwd(),
+			customTools: [sendImageTool, sendFileTool],
 		});
 
 		const ctx: ContactContext = {
@@ -292,6 +328,14 @@ async function main() {
 			),
 			"KAWA_LIVE_MSG_UPDATE_INTERVAL_MS",
 		),
+		filesDir: process.env.KAWA_FILES_DIR ?? join(process.cwd(), "kawa-files"),
+		ffmpegBin: process.env.KAWA_FFMPEG_BIN ?? defaultConfig.ffmpegBin,
+		imageMaxDimension: Number(
+			process.env.KAWA_IMAGE_MAX_DIMENSION ?? defaultConfig.imageMaxDimension,
+		),
+		fileBufferTimeoutMs: Number(
+			process.env.KAWA_FILE_BUFFER_TIMEOUT_MS ?? defaultConfig.fileBufferTimeoutMs,
+		),
 	};
 
 	console.log("[kawa] Starting Kawa agent...");
@@ -304,6 +348,16 @@ async function main() {
 	// Task 9.2: Detect missing simplex-chat CLI
 	detectSimplexBin(config);
 
+	// Detect ffmpeg for video frame extraction
+	detectFfmpegBin(config);
+
+	// Create file storage directories
+	for (const subdir of ["images", "videos", "files"]) {
+		const dir = join(config.filesDir, subdir);
+		mkdirSync(dir, { recursive: true });
+		console.log(`[kawa] Files directory ready: ${dir}`);
+	}
+
 	// Task 9.3: Setup logging for lifecycle events
 	const sessions = new SessionManager(config.maxSessions);
 	const formatter = new EventFormatter(config);
@@ -314,9 +368,18 @@ async function main() {
 		_messageSender: MessageSender,
 		_commandHandler: CommandHandler,
 		_throttler: LiveMessageThrottler,
+		_fileReceiver: FileReceiver,
 	): Promise<void> {
 		// Task 4.1-4.3: Bot profile setup
 		await setupBotProfile(_chatClient, config);
+
+		// Configure SimpleX to store received files in KAWA_FILES_DIR
+		try {
+			await _chatClient.sendChatCmd(`/_files_folder ${config.filesDir}`);
+			console.log(`[kawa] Set files folder to: ${config.filesDir}`);
+		} catch (err) {
+			console.warn("[kawa] Failed to set files folder:", err);
+		}
 
 		console.log("[kawa] Kawa is online! Waiting for messages...");
 
@@ -329,6 +392,7 @@ async function main() {
 			formatter,
 			_throttler,
 			config,
+			_fileReceiver,
 		);
 	}
 
@@ -348,12 +412,39 @@ async function main() {
 					sender,
 					config,
 					(contactId) =>
-						createAndWireSessionForHandler(contactId, sessions, sender, formatter, throttler),
+						createAndWireSessionForHandler(
+							contactId,
+							sessions,
+							sender,
+							formatter,
+							throttler,
+							config,
+						),
 					throttler,
 				);
+				const fileReceiver = new FileReceiver(
+					connectedClient,
+					config,
+					async (contactId, text, images, filePath) => {
+						// Callback for when a buffered message with file is ready to prompt the agent
+						await handleIncomingMessage(
+							contactId,
+							text,
+							sessions,
+							sender,
+							cmdHandler,
+							formatter,
+							throttler,
+							config,
+							images,
+							filePath,
+						);
+					},
+				);
+
 				simplexProcess.resetBackoff();
 
-				await runSessionLoop(connectedClient, sender, cmdHandler, throttler);
+				await runSessionLoop(connectedClient, sender, cmdHandler, throttler, fileReceiver);
 			} catch (err) {
 				console.error("[kawa] Failed to connect to SimpleX:", err);
 			}
@@ -419,6 +510,15 @@ async function setupBotProfile(chatClient: ChatClient, config: KawaConfig): Prom
 }
 
 /**
+ * Helper to extract file ID from an AChatItem.
+ */
+function aChatItemFileId(
+	chatItem: import("@simplex-chat/types/dist/types.js").AChatItem,
+): number | null {
+	return chatItem.chatItem.file?.fileId ?? null;
+}
+
+/**
  * Main event loop: process incoming SimpleX events.
  */
 async function processEvents(
@@ -429,6 +529,7 @@ async function processEvents(
 	formatter: EventFormatter,
 	throttler: LiveMessageThrottler,
 	config: KawaConfig,
+	fileReceiver: FileReceiver,
 ): Promise<void> {
 	try {
 		for await (const event of chatClient.msgQ) {
@@ -441,6 +542,7 @@ async function processEvents(
 				formatter,
 				throttler,
 				config,
+				fileReceiver,
 			);
 		}
 	} catch (err) {
@@ -460,6 +562,7 @@ async function handleSimpleXEvent(
 	formatter: EventFormatter,
 	throttler: LiveMessageThrottler,
 	config: KawaConfig,
+	fileReceiver: FileReceiver,
 ): Promise<void> {
 	switch (event.type) {
 		// Task 5.3: New contact connected
@@ -473,6 +576,7 @@ async function handleSimpleXEvent(
 				sender,
 				formatter,
 				throttler,
+				config,
 			);
 			if (ctx) {
 				await sender.sendTextMessage(
@@ -502,8 +606,24 @@ async function handleSimpleXEvent(
 				const contactId = aChatItem.chatInfo.contact.contactId;
 				if (contactId === undefined) continue;
 
+				// Check for file attachments (image, video, file)
+				const chatItem = aChatItem.chatItem;
+				if (chatItem.file && chatItem.content.type === "rcvMsgContent") {
+					const msgContent = chatItem.content.msgContent;
+					if (
+						msgContent &&
+						(msgContent.type === "image" ||
+							msgContent.type === "video" ||
+							msgContent.type === "file")
+					) {
+						// Delegate file-attached messages to FileReceiver
+						await fileReceiver.handleNewChatItem(chatItem, contactId);
+						continue;
+					}
+				}
+
 				// Extract text content
-				const text = extractTextFromContent(aChatItem.chatItem.content);
+				const text = extractTextFromContent(chatItem.content);
 				if (!text) continue;
 
 				await handleIncomingMessage(
@@ -514,8 +634,28 @@ async function handleSimpleXEvent(
 					commandHandler,
 					formatter,
 					throttler,
+					config,
 				);
 			}
+			break;
+		}
+
+		// File transfer events
+		case "rcvFileStart": {
+			const fileId = aChatItemFileId(event.chatItem);
+			if (fileId !== null) {
+				fileReceiver.handleRcvFileStart(fileId);
+			}
+			break;
+		}
+
+		case "rcvFileComplete": {
+			await fileReceiver.handleRcvFileComplete(event.chatItem);
+			break;
+		}
+
+		case "rcvFileSndCancelled": {
+			await fileReceiver.handleRcvFileCancelled(event.chatItem);
 			break;
 		}
 	}
@@ -530,8 +670,9 @@ async function createAndWireSessionForHandler(
 	sender: MessageSender,
 	formatter: EventFormatter,
 	throttler: LiveMessageThrottler,
+	config: KawaConfig,
 ): Promise<ContactContext | undefined> {
-	const ctx = await createSessionForContact(contactId, sessions);
+	const ctx = await createSessionForContact(contactId, sessions, sender, config);
 	if (!ctx) return undefined;
 	wireSessionEvents(ctx, sender, formatter, throttler);
 	return ctx;
@@ -548,6 +689,9 @@ async function handleIncomingMessage(
 	commandHandler: CommandHandler,
 	formatter: EventFormatter,
 	throttler: LiveMessageThrottler,
+	config: KawaConfig,
+	images?: ImageContent[],
+	filePath?: string,
 ): Promise<void> {
 	// Task 8.5: Check for slash commands first
 	const isCommand = await commandHandler.handle(contactId, text);
@@ -558,11 +702,27 @@ async function handleIncomingMessage(
 
 	// Task 5.5: Auto-create session for unknown contacts
 	if (!ctx) {
-		ctx = await createAndWireSessionForHandler(contactId, sessions, sender, formatter, throttler);
+		// Note: createAndWireSessionForHandler needs config from the caller scope
+		// This is passed via closure from main()
+		ctx = await createAndWireSessionForHandler(
+			contactId,
+			sessions,
+			sender,
+			formatter,
+			throttler,
+			config,
+		);
 		if (!ctx) {
 			await sender.sendTextMessage(contactId, "❌ Kawa is at capacity. Try again later.");
 			return;
 		}
+	}
+
+	// Append file path reference for generic files
+	let promptText = text;
+	if (filePath) {
+		const suffix = `📎 Attached: ${filePath}`;
+		promptText = text ? `${text}\n${suffix}` : suffix;
 	}
 
 	// Increment generation to invalidate any in-flight agent events from prior prompts.
@@ -570,7 +730,7 @@ async function handleIncomingMessage(
 	// it queues a message on the current stream, so in-flight events remain valid.
 	try {
 		if (ctx.session.state.isStreaming) {
-			await ctx.session.followUp(text);
+			await ctx.session.followUp(promptText, images);
 		} else {
 			ctx.generation++;
 			ctx.liveMessageState = "IDLE";
@@ -578,7 +738,11 @@ async function handleIncomingMessage(
 			ctx.liveMessageItemId = null;
 			ctx.lastSentText = "";
 			throttler.cancel(ctx);
-			await ctx.session.prompt(text);
+			if (images && images.length > 0) {
+				await ctx.session.prompt(promptText, { images });
+			} else {
+				await ctx.session.prompt(promptText);
+			}
 		}
 	} catch (err) {
 		console.error(`[kawa] Error prompting session for contact ${contactId}:`, err);

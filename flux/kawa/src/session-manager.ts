@@ -27,10 +27,6 @@ export interface ContactContext {
 	/** Text of the last successfully sent live message update (for no-op flush detection) */
 	lastSentText: string;
 }
-
-/**
- * Manages per-contact AgentSessions with O(1) lookups.
- */
 export class SessionManager {
 	private byContactId = new Map<number, ContactContext>();
 	private throttler: LiveMessageThrottler | null = null;

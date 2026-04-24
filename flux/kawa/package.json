@@ -18,6 +18,7 @@
   "dependencies": {
     "@mariozechner/pi-coding-agent": "^0.68.0",
     "@simplex-chat/types": "^0.4.0",
+    "sharp": "^0.34.5",
     "simplex-chat": "^0.3.0"
   },
   "devDependencies": {
