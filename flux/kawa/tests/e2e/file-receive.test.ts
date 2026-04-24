@@ -24,7 +24,8 @@ describe("file-receive", () => {
 		await writeFile(testFilePath, 'print("Hello, World!")\n');
 
 		// Send the file to Kawa using apiSendMessages
-		const client = aliceClient!;
+		if (!aliceClient) throw new Error("Alice client not initialized");
+		const client = aliceClient;
 		await client.apiSendMessages(ChatType.Direct as unknown as number, kawaContactId, [
 			{
 				fileSource: { filePath: testFilePath },

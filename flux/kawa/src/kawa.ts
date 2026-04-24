@@ -622,6 +622,17 @@ async function handleSimpleXEvent(
 					}
 				}
 
+				// Log voice messages (non-goal: silently drop)
+				if (
+					chatItem.content.type === "rcvMsgContent" &&
+					chatItem.content.msgContent?.type === "voice"
+				) {
+					console.log(
+						`[kawa] Received voice message from contact ${contactId} — not supported, ignoring`,
+					);
+					continue;
+				}
+
 				// Extract text content
 				const text = extractTextFromContent(chatItem.content);
 				if (!text) continue;

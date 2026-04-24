@@ -123,6 +123,7 @@ export class MessageSender {
 
 			await this.chatClient.apiSendMessages(DIRECT_CHAT_TYPE, contactId, [
 				{
+					fileSource: { filePath },
 					msgContent: { type: "image" as const, text, image: base64 },
 					mentions: {},
 				},

@@ -2,7 +2,7 @@ import { mkdirSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { extname, join } from "node:path";
 import type { ImageContent } from "@mariozechner/pi-ai";
-import type { AChatItem, ChatItem, MsgContent } from "@simplex-chat/types/dist/types.js";
+import type { AChatItem, ChatItem } from "@simplex-chat/types/dist/types.js";
 import type { ChatClient } from "simplex-chat";
 import type { KawaConfig } from "./config.js";
 import { imageFileToImageContent } from "./image-resize.js";
@@ -117,7 +117,8 @@ export class FileReceiver {
 	 * Handle rcvFileComplete event. Resolve the buffer and route the file.
 	 */
 	async handleRcvFileComplete(chatItem: AChatItem): Promise<void> {
-		const fileId = this.extractFileId(chatItem);
+		const file = chatItem.chatItem.file;
+		const fileId = file?.fileId ?? null;
 		if (fileId === null) return;
 
 		const pending = this.pendingFiles.get(fileId);
@@ -130,9 +131,10 @@ export class FileReceiver {
 		clearTimeout(pending.timeout);
 		this.pendingFiles.delete(fileId);
 
-		// Determine the file path — files are stored in KAWA_FILES_DIR
-		const subDir = this.getSubDir(pending.msgContentType);
-		const filePath = join(this.config.filesDir, subDir, pending.fileName);
+		// Determine the file path — use fileSource.filePath if available,
+		// otherwise construct from fileName in the files dir
+		const filesDir = this.config.filesDir;
+		const filePath = file?.fileSource?.filePath ?? join(filesDir, pending.fileName);
 
 		console.log(
 			`[file-receiver] File transfer complete: fileId=${fileId}, type=${pending.msgContentType}, path=${filePath}`,
@@ -247,34 +249,22 @@ export class FileReceiver {
 	/**
 	 * Get the subdirectory name for a content type.
 	 */
-	private getSubDir(msgContentType: string): string {
-		switch (msgContentType) {
-			case "image":
-				return "images";
-			case "video":
-				return "videos";
-			default:
-				return "files";
-		}
-	}
-
 	/**
 	 * Extract text from a MsgContent that may carry a caption.
+	 * Note: MsgContent.Image, .Video, .File all carry a `text` field at runtime
+	 * (from the outer type definitions), even though the inner namespace
+	 * definitions don't include it. We access it via runtime property check.
 	 */
-	private extractTextFromContent(msgContent: MsgContent): string {
+	private extractTextFromContent(msgContent: { type: string; text?: string }): string | undefined {
 		switch (msgContent.type) {
 			case "text":
-				return (msgContent as MsgContent.Text).text;
 			case "image":
-				return (msgContent as MsgContent.Image).text || "📷 Image";
 			case "video":
-				return (msgContent as MsgContent.Video).text || "🎥 Video";
 			case "file":
-				return (msgContent as MsgContent.File).text || "📎 File";
 			case "link":
-				return (msgContent as MsgContent.Link).text;
+				return msgContent.text || undefined;
 			default:
-				return "";
+				return undefined;
 		}
 	}
 
