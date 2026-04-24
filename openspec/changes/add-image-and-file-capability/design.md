@@ -41,7 +41,7 @@ The Gemma 3 model (via Ollama) supports images natively through `ImageContent`. 
 
 **Rationale**: Vision models need the image data at prompt time — sending text without the image, then sending a follow-up with the image, means the model can't connect the text to the visual content. Buffering ensures the agent sees everything together. The timeout prevents blocked conversations on slow transfers.
 
-**Key SDK insight**: Text captions arrive embedded in the `MsgContent` variant itself (`MsgContent.Image.text`, `MsgContent.File.text`), not as a separate event. A single `newChatItems` event carries both the caption text and the file reference (`ChatItem.file: CIFile`). The file transfer lifecycle (`rcvFileStart`, `rcvFileComplete`) is tracked via separate events with their own `AChatItem` fields. Kawa calls `apiReceiveFile(fileId)` when it sees a `CIFile` with `fileStatus === "rcvInvitation"`, then waits for `rcvFileComplete` before prompting.
+**Key SDK insight**: Text captions arrive embedded in the `MsgContent` variant itself at runtime (`msgContent.text`), but the SimpleX SDK's received `MsgContent.Image` and `MsgContent.Video` TypeScript types do not declare a `.text` property. The code uses runtime property access with fallbacks rather than type casts. A single `newChatItems` event carries both the caption text and the file reference (`ChatItem.file: CIFile`). The file transfer lifecycle (`rcvFileStart`, `rcvFileComplete`, `rcvFileSndCancelled`) is tracked via separate events with their own `AChatItem` fields. Kawa calls `apiReceiveFile(fileId)` when it sees a `CIFile` with `fileStatus === "rcvInvitation"`, then waits for `rcvFileComplete` before prompting. Note: the SDK does not expose `rcvFileCancelled` as a `ChatEvent` — receiver-initiated cancellations appear as `newChatItems` updates with `fileStatus === "rcvCancelled"`.
 
 **Alternatives considered**:
 - Prompt immediately, follow up with image → model can't associate text with image context
@@ -111,9 +111,9 @@ The Gemma 3 model (via Ollama) supports images natively through `ImageContent`. 
 
 ### D9: SimpleX setFilesFolder to KAWA_FILES_DIR
 
-**Decision**: On startup, after connecting to SimpleX, send a `setFilesFolder` command pointing to `kawa-files/` so SimpleX stores received files in the same directory tree Kawa uses.
+**Decision**: On startup, after connecting to SimpleX, send a `setFilesFolder` command pointing to `kawa-files/` so SimpleX stores received files in the same directory tree Kawa uses. Because `setFilesFolder` stores files flat (not in subdirectories), `handleRcvFileComplete` must read the actual file path from the `rcvFileComplete` event (via `chatItem.chatItem.file.fileSource?.filePath`) rather than constructing a subdirectory path. Files may need to be moved or copied into `images/`, `videos/`, or `files/` subdirectories after receipt for type-specific processing.
 
-**Rationale**: The SimpleX CLI has a `setFilesFolder` command that controls where received files are saved. Setting this to Kawa's files directory ensures files land where Kawa expects them, eliminating the need to copy or move received files.
+**Rationale**: The SimpleX CLI has a `setFilesFolder` command that controls where received files are saved. Setting this to Kawa's files directory ensures files land in a known location. The split subdirectory layout (D1) is maintained for organization, but because SimpleX stores flat, the implementation must reconcile the two by reading the event-provided path and optionally relocating the file.
 
 **SDK note**: `setFilesFolder` is not a typed method on `ChatClient`. It's a raw chat command that must be sent via `ChatClient.sendChatCmd()`. The command interface is `{ type: "setFilesFolder", filePath: string }` and the wire format is `/_files_folder <filePath>`. Send it as `chatClient.sendChatCmd(CC.SetFilesFolder.cmdString({ type: "setFilesFolder", filePath: config.filesDir }))` or as the raw string `/_files_folder /path/to/kawa-files`.
 

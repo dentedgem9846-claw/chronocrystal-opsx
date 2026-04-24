@@ -82,9 +82,12 @@ Kawa SHALL handle SimpleX file transfer events in the main event loop to track f
 - **AND** Kawa SHALL prompt the agent with the buffered text and the processed file content
 
 #### Scenario: File transfer is cancelled
-- **WHEN** Kawa receives a `rcvFileCancelled` or `rcvFileSndCancelled` event
+- **WHEN** Kawa receives an `rcvFileSndCancelled` event (sender cancelled)
+- **OR** Kawa receives a `newChatItems` update with `CIFile.fileStatus === "rcvCancelled"` (receiver cancelled)
 - **THEN** Kawa SHALL discard the pending buffer
 - **AND** Kawa SHALL prompt the agent with the text only, noting that the file transfer was cancelled
+
+*Note*: The SimpleX SDK does not expose `rcvFileCancelled` as a separate `ChatEvent` type. Receiver-initiated cancellations are surfaced through `newChatItems` with a changed `CIFile` status.
 
 ### Requirement: SimpleX files folder configuration
 Kawa SHALL configure the SimpleX CLI to store received files in the `KAWA_FILES_DIR` directory by sending a `setFilesFolder` command after connecting.
